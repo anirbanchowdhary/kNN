@@ -18,15 +18,33 @@ and *at what spatial scale* r does that response show up?
 
 ## Data assumptions
 
-- Snapshots live at `<sim_path>/LH_<id>/snapshot_<snap:03d>.hdf5`, one
-  directory per LH simulation. Black holes are in the `PartType5` HDF5 group
-  (`Coordinates`, `BH_Mass`, `BH_Mdot`); `Header` carries `HubbleParam`.
-- The parameter table is a whitespace-delimited text file whose first column
-  is `LH_<id>` and whose other columns are the 6 parameters above.
-- Both paths default to the same locations the reference project used
-  (`src/config.py`: `SIM_PATH`, `PARAMS_FILE`) — override them there or via
-  `run_suite(sim_path=..., ...)` / `load_params(params_file=...)` for a
-  different layout.
+Verified against the [CAMELS data organization docs](https://camels.readthedocs.io/en/latest/organization.html):
+CAMELS data on disk (and on Globus / the public URL / the Rusty Cluster
+mount) is organized `<Type>/<Suite>/<Generation>/<Set>/<Realization>`:
+
+```
+Sims/IllustrisTNG/L25n256/LH/LH_<0..999>/snapshot_<###>.hdf5
+Parameters/IllustrisTNG/L25n256/LH/CosmoAstroSeed_IllustrisTNG_L25n256_LH.txt
+```
+
+- `SUITE="IllustrisTNG"`, `GENERATION="L25n256"` (25 Mpc/h box, matching
+  `BOXSIZE`), `SET_NAME="LH"` (1000 simulations, `LH_0`..`LH_999`) — all in
+  `src/config.py`, combined into `SIM_PATH`/`PARAMS_FILE` there. Set
+  `DATA_ROOT` to wherever your local `Sims/`/`Parameters/` folders live, or
+  override `SIM_PATH`/`PARAMS_FILE` directly (or pass
+  `run_suite(sim_path=..., ...)` / `load_params(params_file=...)`) if your
+  layout differs.
+- Snapshot files are `snapshot_<snap:03d>.hdf5` with black holes in the
+  `PartType5` HDF5 group (`Coordinates`, `BH_Mass`, `BH_Mdot`); `Header`
+  carries `HubbleParam`. This is the **post-2024 naming** (CAMELS renamed
+  `snap_###.hdf5` -> `snapshot_###.hdf5` and standardized snapshot numbering
+  to 91 steps, 000=z=15 .. 090=z=0, across all suites). If your local data
+  predates that reorganization it will use the old `snap_###.hdf5` naming
+  and a shorter 34-snapshot range instead — `src/data_io.py:find_snapshots`
+  would need updating for that case.
+- The parameter table (`CosmoAstroSeed_<suite>_<generation>_<set>.txt`) is
+  whitespace-delimited; its first column is `LH_<id>` and the other columns
+  are the 6 parameters above plus the random seed.
 
 ## Layout
 

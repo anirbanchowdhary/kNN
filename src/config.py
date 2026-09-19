@@ -53,10 +53,24 @@ ALL_PARAMS = COSMO_PARAMS + ASTRO_PARAMS
 # ----------------------------------------------------------------------
 # Paths (override these to point at your local data)
 # ----------------------------------------------------------------------
+#
+# CAMELS data on disk is organized Type / Suite / Generation / Set / Realization
+# (https://camels.readthedocs.io/en/latest/organization.html):
+#   Sims/IllustrisTNG/L25n256/LH/LH_<0..999>/snapshot_<###>.hdf5
+#   Parameters/IllustrisTNG/L25n256/LH/CosmoAstroSeed_IllustrisTNG_L25n256_LH.txt
+# DATA_ROOT should point at the directory containing the "Sims" and
+# "Parameters" type folders (e.g. a Globus/URL download root, or the
+# Rusty Cluster PUBLIC_RELEASE mount).
 
-SIM_PATH = "../../Data/Sims/IllustrisTNG/LH"
+SUITE = "IllustrisTNG"
+GENERATION = "L25n256"   # 25 Mpc/h box, 256^3 particles -- matches BOXSIZE above
+SET_NAME = "LH"            # Latin Hypercube: LH_0 .. LH_999
+
+DATA_ROOT = "../../Data"
+
+SIM_PATH = f"{DATA_ROOT}/Sims/{SUITE}/{GENERATION}/{SET_NAME}"
 PARAMS_FILE = (
-    "../CAMELS-master/docs/params/IllustrisTNG/"
-    "CosmoAstroSeed_IllustrisTNG_L25n256_LH.txt"
+    f"{DATA_ROOT}/Parameters/{SUITE}/{GENERATION}/{SET_NAME}/"
+    f"CosmoAstroSeed_{SUITE}_{GENERATION}_{SET_NAME}.txt"
 )
 OUTPUT_DIR = "../outputs"
