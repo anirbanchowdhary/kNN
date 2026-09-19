@@ -30,7 +30,14 @@ def parse_1p_label(label):
     """
     m = _LABEL_RE.match(label)
     if not m:
-        raise ValueError(f"'{label}' is not a 1P label of the form 'p<N>_<M>'")
+        if label == '0' :
+            return 0,0 
+        elif label.split('_')[1][0]== 'n' :
+            negative_ = re.compile(r"^p(\d+)_n(\d+)$")
+            m = negative_.match(label)
+            return int(m.group(1)), -1*int(m.group(2))
+        else :
+            raise ValueError(f"'{label}' is not a 1P label of the form 'p<N>_<M>'")
     return int(m.group(1)), int(m.group(2))
 
 
