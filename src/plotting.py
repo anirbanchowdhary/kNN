@@ -70,11 +70,17 @@ def plot_scale_grid(table, params=None, ncols=3, figsize=None, logx=True, share_
     return fig, axes
 
 
-def plot_sensitivity_bar(summary_df, cosmo_params, astro_params, ax=None, figsize=(7, 4)):
+def plot_sensitivity_bar(summary_df, cosmo_params, astro_params, ax=None, figsize=(7.5, 4)):
     """
-    Bar chart ranking all parameters by scalar R(p), colored by whether
-    the parameter is cosmological or astrophysical (feedback), with
-    bootstrap error bars.
+    Bar chart ranking all parameters by scalar R(p), colored by whether the
+    parameter is cosmological or astrophysical (feedback).
+
+    The dashed line is the 95% permutation-null floor -- the R a parameter
+    reaches by chance alone. That line, not the error bars, is what decides
+    significance: R is an RMS and so is positive-definite, meaning its
+    bootstrap CI excludes zero even for a parameter that does nothing.
+    Parameters that don't clear FDR-corrected significance are drawn faded,
+    and each bar is annotated with its q-value.
     """
     if ax is None:
         fig, ax = plt.subplots(figsize=figsize)
@@ -85,20 +91,40 @@ def plot_sensitivity_bar(summary_df, cosmo_params, astro_params, ax=None, figsiz
     y = np.arange(len(df))
 
     colors = ["#1a1a2e" if p in cosmo_params else "#e07a5f" for p in df["parameter"]]
+    alphas = [1.0 if s else 0.35 for s in df["significant"]]
     err_lo = np.maximum(df["R_obs"] - df["ci_lo"], 0)
     err_hi = np.maximum(df["ci_hi"] - df["R_obs"], 0)
 
-    ax.barh(y, df["R_obs"], xerr=[err_lo, err_hi], color=colors, edgecolor="white",
-            linewidth=0.5, height=0.6, capsize=3, error_kw=dict(lw=1.2, color="#333333"), zorder=3)
+    bars = ax.barh(y, df["R_obs"], xerr=[err_lo, err_hi], color=colors, edgecolor="white",
+                   linewidth=0.5, height=0.6, capsize=3,
+                   error_kw=dict(lw=1.2, color="#333333"), zorder=3)
+    for bar, a in zip(bars, alphas):
+        bar.set_alpha(a)
+
+    null_floor = df["null_floor"].median()
+    ax.axvline(null_floor, color="#c0392b", ls="--", lw=1.5, zorder=4,
+               label=f"95% null floor ({null_floor:.4f})")
+
+    for i, row in df.iterrows():
+        q = row["q_value"]
+        label = "q < 0.001" if q < 0.001 else f"q = {q:.3f}"
+        ax.text(max(row["ci_hi"], row["R_obs"]) * 1.03, i, label,
+                va="center", fontsize=8, color="#555555")
 
     ax.set_yticks(y)
     ax.set_yticklabels(df["parameter"])
     ax.set_xlabel(r"RMS response $R(p)$")
+    ax.set_xlim(0, max(df["ci_hi"].max(), null_floor) * 1.35)
     ax.spines[["top", "right"]].set_visible(False)
 
     from matplotlib.patches import Patch
-    handles = [Patch(color="#1a1a2e", label="cosmological"), Patch(color="#e07a5f", label="astrophysical (feedback)")]
-    ax.legend(handles=handles, fontsize=8, framealpha=0.9, loc="lower right")
+    handles = [
+        Patch(color="#1a1a2e", label="cosmological"),
+        Patch(color="#e07a5f", label="astrophysical (feedback)"),
+        *ax.get_legend_handles_labels()[0],
+    ]
+    # upper right: the largest bar sits at the bottom, so the top rows are clear
+    ax.legend(handles=handles, fontsize=8, framealpha=0.9, loc="upper right")
 
     fig.tight_layout()
     return fig, ax

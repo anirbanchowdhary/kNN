@@ -26,6 +26,48 @@ def eddington_ratio(bh_mass, lbol):
     return lbol / ledd
 
 
+def eligible_mask(bh_mass, bh_mdot, mass_cut):
+    """BHs above the mass floor with a finite, positive luminosity."""
+    lbol = bolometric_luminosity(bh_mdot)
+    return (bh_mass > mass_cut) & np.isfinite(lbol) & (lbol > 0)
+
+
+def count_eligible(bh_mass, bh_mdot, mass_cut):
+    """How many BHs could be selected from, before any luminosity ranking."""
+    return int(eligible_mask(bh_mass, bh_mdot, mass_cut).sum())
+
+
+def select_brightest_n(bh_mass, bh_mdot, mass_cut, n_target):
+    """
+    Boolean mask selecting exactly the `n_target` most luminous eligible BHs.
+
+    This is the fixed-number-density selection: every simulation contributes
+    the same number of tracers, so the kNN-CDF's (strong, nonlinear)
+    dependence on tracer number density is held fixed by construction rather
+    than regressed out afterwards. Any remaining parameter response is then
+    clustering, not abundance.
+
+    Returns
+    -------
+    mask : bool ndarray. All-False when fewer than `n_target` BHs are
+           eligible -- such a simulation cannot contribute at this density
+           and must be dropped (which makes whole-sim retention bias the
+           thing to watch; see selection_bias.diagnose_retention_bias).
+    """
+    eligible = eligible_mask(bh_mass, bh_mdot, mass_cut)
+
+    if eligible.sum() < n_target:
+        return np.zeros(len(bh_mass), dtype=bool)
+
+    lbol = bolometric_luminosity(bh_mdot)
+    idx = np.flatnonzero(eligible)
+    brightest = idx[np.argsort(lbol[idx])[::-1][:n_target]]
+
+    mask = np.zeros(len(bh_mass), dtype=bool)
+    mask[brightest] = True
+    return mask
+
+
 def select_luminous_agn(bh_mass, bh_mdot, mass_cut, top_fraction):
     """
     Boolean mask selecting the top `top_fraction` of BHs by bolometric

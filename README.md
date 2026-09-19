@@ -61,7 +61,8 @@ src/
   sensitivity.py                 scale-resolved + scalar parameter response, with bootstrap/null
   plotting.py                     figures for sensitivity_table() output
 notebooks/
-  01_agn_luminosity_knn_sensitivity.ipynb   the full run, end to end
+  01_agn_luminosity_knn_sensitivity.ipynb   top-10%-by-luminosity run (executed)
+  02_fixed_density_agn_knn.ipynb             fixed-number-density run + comparison
 tests/
   synthetic-data unit tests for knn_cdf, abundance, sensitivity, and the
   sim_id alignment logic (no simulation data required to run these)
@@ -89,6 +90,24 @@ tests/
   differently-ordered `sim_ids` got zipped together via `np.isin`-then-mask,
   which preserved each array's *own* order rather than a shared one, and
   silently mixed up which residual vector belonged to which simulation.
+- **Fixed number density is the preferred selection.** `run_suite(n_target=N)`
+  takes exactly the N brightest AGN per simulation, so tracer density is
+  constant across the suite by construction. This matters because the
+  kNN-CDF depends on density through a Poisson form that is strongly
+  *nonlinear* in n, while `remove_abundance` only removes a trend linear in
+  `log10(n)` — the leftover leaks into any parameter correlated with n. In
+  the first real run `Omega_m` correlated with AGN count at Spearman
+  ρ = 0.98, which makes "does `Omega_m` change clustering or just
+  abundance?" unanswerable under the top-fraction selection. Fixed-N removes
+  the confound at the source; the cost is that sparse simulations get
+  dropped, which makes whole-sim retention the bias to watch instead
+  (`diagnose_retention_bias`).
+- **Significance comes from the permutation null, never the error bars.**
+  `R(p)` is an RMS and therefore positive-definite, so its bootstrap CI
+  excludes zero even for a parameter with no effect at all. Read `q_value`
+  (Benjamini–Hochberg FDR across the 6 parameters — with 6 tests there's a
+  ~26% chance of a spurious p < 0.05) or compare `R_obs` to `null_floor`.
+  `plot_sensitivity_bar` draws that floor and fades non-significant bars.
 - **Selection-bias diagnostics are not optional for this selection.**
   Because the tracer is *luminosity*-selected (not mass-only), the number of
   AGN surviving the cut in a given simulation can itself correlate with a

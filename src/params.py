@@ -17,7 +17,7 @@ def load_params(params_file):
     The file is whitespace-delimited with a header row; the first column
     holds simulation names like "LH_0", "LH_1", ...
     """
-    params = pd.read_csv(params_file, delim_whitespace=True)
+    params = pd.read_csv(params_file, sep=r"\s+")
 
     name_col = params.columns[0]
     params["sim_id"] = (

@@ -84,3 +84,35 @@ def test_summary_dataframe_shape():
 
     assert set(df["parameter"]) == {"Omega_m", "sigma_8", "A_SN1"}
     assert {"R_obs", "ci_lo", "ci_hi", "p_value", "significant"} <= set(df.columns)
+
+
+def test_benjamini_hochberg_is_monotone_and_at_least_p():
+    from src.sensitivity import benjamini_hochberg
+
+    p = np.array([0.0001, 0.0105, 0.035, 0.225, 0.418, 0.744])
+    q = benjamini_hochberg(p)
+
+    assert np.all(q >= p - 1e-12)         # correction never makes things look better
+    assert np.all(np.diff(q) >= -1e-12)   # monotone in p
+    assert np.all(q <= 1.0)
+
+    # On the real run's p-values: Omega_m and sigma_8 survive FDR, A_SN1 doesn't.
+    assert q[0] < 0.05
+    assert q[1] < 0.05
+    assert q[2] > 0.05
+
+
+def test_summary_dataframe_reports_null_floor_and_qvalues():
+    residuals, theta, n_k, n_r = _synthetic_case()
+    rgrid = np.logspace(-1.5, 1.2, n_r)
+
+    table = sensitivity_table(
+        residuals, theta, n_k=n_k, rgrid=rgrid, kvals=list(range(n_k)),
+        params=["Omega_m", "sigma_8", "A_SN1"], n_boot=100, n_null=100,
+    )
+    df = summary_dataframe(table)
+
+    assert {"null_floor", "q_value"} <= set(df.columns)
+    assert np.all(df["null_floor"] > 0)
+    # significance is driven by the null floor, not by the CI excluding zero
+    assert np.all(df["ci_lo"] > 0)

@@ -140,6 +140,7 @@ def sensitivity_table(
         r_ci_lo, r_ci_hi = np.nanpercentile(r_boot, [100 * alpha / 2, 100 * (1 - alpha / 2)])
         r_null = np.sqrt(np.nanmean(null.reshape(null.shape[0], -1) ** 2, axis=1))
         r_p_value = np.mean(r_null >= r_scalar)
+        r_null_floor = np.nanpercentile(r_null, 95)
 
         table[p] = {
             "obs": obs,
@@ -152,22 +153,59 @@ def sensitivity_table(
             "R_ci_lo": r_ci_lo,
             "R_ci_hi": r_ci_hi,
             "R_p_value": r_p_value,
+            "R_null_floor": r_null_floor,
         }
 
     return table
 
 
+def benjamini_hochberg(pvals):
+    """
+    Benjamini-Hochberg FDR-adjusted p-values (q-values).
+
+    Testing all 6 parameters against the same summaries means ~26% chance of
+    at least one p < 0.05 under a global null, so raw p-values overstate
+    significance. BH controls the false discovery rate instead, and is valid
+    under the positive dependence these correlated tests have.
+    """
+    p = np.asarray(pvals, dtype=float)
+    m = len(p)
+    order = np.argsort(p)
+
+    scaled = p[order] * m / np.arange(1, m + 1)
+    # q-values must be monotone in p: sweep the running minimum down from the largest
+    scaled = np.minimum.accumulate(scaled[::-1])[::-1]
+
+    q = np.empty(m)
+    q[order] = np.clip(scaled, 0, 1)
+    return q
+
+
 def summary_dataframe(table):
-    """The scalar R(p) part of `sensitivity_table`'s output as a tidy DataFrame."""
+    """
+    The scalar R(p) part of `sensitivity_table`'s output as a tidy DataFrame.
+
+    `significant` uses the FDR-adjusted q-value, not the raw p-value. Note
+    that `ci_lo`/`ci_hi` are bootstrap bounds on R itself: since R is an RMS
+    (positive-definite), its CI excludes zero even under a pure null, so the
+    CI says nothing about significance -- compare R against `null_floor`, or
+    read `q_value`.
+    """
+    params = table["params"]
+    p_values = [table[p]["R_p_value"] for p in params]
+    q_values = benjamini_hochberg(p_values)
+
     rows = [
         {
             "parameter": p,
             "R_obs": table[p]["R_scalar"],
             "ci_lo": table[p]["R_ci_lo"],
             "ci_hi": table[p]["R_ci_hi"],
+            "null_floor": table[p]["R_null_floor"],
             "p_value": table[p]["R_p_value"],
-            "significant": table[p]["R_p_value"] < 0.05,
+            "q_value": q,
+            "significant": q < 0.05,
         }
-        for p in table["params"]
+        for p, q in zip(params, q_values)
     ]
     return pd.DataFrame(rows)
