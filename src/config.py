@@ -66,11 +66,11 @@ SUITE = "IllustrisTNG"
 GENERATION = "L25n256"   # 25 Mpc/h box, 256^3 particles -- matches BOXSIZE above
 SET_NAME = "LH"            # Latin Hypercube: LH_0 .. LH_999
 
-DATA_ROOT = "../../Data"
+DATA_ROOT = "../../../Data"
 
 SIM_PATH = f"{DATA_ROOT}/Sims/{SUITE}/{GENERATION}/{SET_NAME}"
 PARAMS_FILE = (
-    f"{DATA_ROOT}/Parameters/{SUITE}/{GENERATION}/{SET_NAME}/"
+    f"{DATA_ROOT}/Sims/{SUITE}/{GENERATION}/{SET_NAME}/"
     f"CosmoAstroSeed_{SUITE}_{GENERATION}_{SET_NAME}.txt"
 )
 OUTPUT_DIR = "../outputs"
