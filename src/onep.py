@@ -4,74 +4,99 @@ fiducial. The point of 1P is to check whether a parameter that's null in
 the LH quartile-contrast test (marginalized over the other 5, with seed
 noise) is truly null, or just swamped by that marginalization.
 
-Directory convention: `1P_p<param_index>_<step_index>` (e.g. `1P_p1_3`),
-alongside `LH` at the same Generation level -- see `config.SIM_PATH_1P`.
+Directory convention (verified against real CAMELS-IllustrisTNG 1P data --
+NOT the `1P_p<N>_<M>` form originally assumed): after stripping the `1P_`
+prefix, labels are
 
-The exact grid size, step spacing, and whether multiple seeds exist per
-step are release-specific and not hardcoded here; `infer_1p_parameter_names`
-is the empirical check that stands in for trusting the p1..p6 convention
-blindly -- see notebook 04, which lists what's actually on disk before
-running anything.
+    "0"          the single shared fiducial point, reused across every
+                 parameter's sweep (all parameters sit at their fiducial
+                 value here) -- not its own separate parameter group
+    "<N>_<M>"    parameter N, positive step M
+    "<N>_n<M>"   parameter N, negative step M (e.g. "1_n2" -> step -2)
+
+The exact grid size, step spacing, whether multiple seeds exist per step,
+and how many parameters are varied are release-specific and not hardcoded
+here. In particular, a 1P set need not vary the same 6 parameters as the LH
+set at all -- the CAMELS-IllustrisTNG 1P set actually on disk here varies
+28 astrophysics parameters (WindEnergyIn1e51erg, RadioFeedbackFactor, ...),
+a finer decomposition of feedback than the LH set's 4 lumped amplitudes,
+with only the 2 cosmological columns corresponding directly. See
+`infer_1p_parameter_names`, which discovers columns from the parameter
+table itself rather than assuming `config.ALL_PARAMS`, and notebook 04,
+which lists what's actually on disk before running anything.
 """
 
 import re
 
 import numpy as np
-import pandas as pd
 
+# Only these correspond directly to LH's parameter names; used solely to
+# cross-check the 1P set's cosmological columns against the LH sanity
+# check, never to force-map the astrophysics columns.
+COSMO_ALIASES = {"Omega0": "Omega_m", "sigma8": "sigma_8"}
 
-_LABEL_RE = re.compile(r"^p(\d+)_(\d+)$")
+_LABEL_RE = re.compile(r"^(\d+)_(n)?(\d+)$")
 
 
 def parse_1p_label(label):
     """
-    "p1_3" -> (1, 3): (param_index, step_index), both 1-based as CAMELS
-    names them. Raises ValueError on anything that doesn't match.
+    "1_3" -> (1, 3), "1_n2" -> (1, -2): (param_index, step_index).
+    "0" (the shared fiducial) -> (None, 0) -- it belongs to every
+    parameter's group, not a parameter of its own.
+    Raises ValueError on anything else.
     """
+    if label == "0":
+        return None, 0
+
     m = _LABEL_RE.match(label)
     if not m:
-        if label == '0' :
-            return 0,0 
-        elif label.split('_')[1][0]== 'n' :
-            negative_ = re.compile(r"^p(\d+)_n(\d+)$")
-            m = negative_.match(label)
-            return int(m.group(1)), -1*int(m.group(2))
-        else :
-            raise ValueError(f"'{label}' is not a 1P label of the form 'p<N>_<M>'")
-    return int(m.group(1)), int(m.group(2))
+        raise ValueError(
+            f"'{label}' is not a 1P label of the form '<N>_<M>', '<N>_n<M>', or '0'"
+        )
+    param_index, negative, step = m.groups()
+    step = int(step)
+    if negative:
+        step = -step
+    return int(param_index), step
 
 
-def infer_1p_parameter_names(theta_1p, all_params, tol=1e-8):
+def infer_1p_parameter_names(theta_1p, tol=1e-8, exclude=("seed",)):
     """
-    For each param_index group in `theta_1p` (indexed by "p<N>_<M>" labels),
-    find which single column of `all_params` actually varies across that
-    group -- the empirical check standing in for trusting the CAMELS
-    p1..p6 -> parameter-name convention blindly.
+    For each param_index group in `theta_1p` (indexed by 1P labels), find
+    which single column actually varies across that group -- discovered
+    from `theta_1p`'s own columns, not assumed to be any particular fixed
+    list, since a 1P set's parameterization can differ entirely from the
+    LH set's (see module docstring).
 
     Parameters
     ----------
-    theta_1p   : DataFrame indexed by "p<N>_<M>" labels (from
-                 `params.load_1p_params`), columns include `all_params`
-    all_params : the 6 parameter names to check (config.ALL_PARAMS)
-    tol        : a column with range <= tol within a group is "not varying"
+    theta_1p : DataFrame indexed by 1P labels (from `params.load_1p_params`)
+    tol      : a column with range <= tol within a group is "not varying"
+    exclude  : columns never considered as candidates (e.g. the random seed,
+               which varies but isn't a physics parameter)
 
     Returns
     -------
-    mapping : dict {param_index: parameter_name}, only for groups that
-              cleanly match exactly one varying column
+    mapping   : dict {param_index: column_name}, only for groups that
+                cleanly match exactly one varying column. The shared
+                fiducial ("0", param_index None) is never a key here.
     ambiguous : dict {param_index: [varying_column_names]} for any group
                 that matched zero or more-than-one columns -- inspect these
                 by hand rather than trusting the inferred mapping
     """
+    candidates = [c for c in theta_1p.columns if c not in exclude]
+
     parsed = {label: parse_1p_label(label) for label in theta_1p.index}
-    param_indices = sorted({p for p, _ in parsed.values()})
+    param_indices = sorted({p for p, _ in parsed.values() if p is not None})
+    fiducial_labels = [lab for lab, (p, _) in parsed.items() if p is None]
 
     mapping = {}
     ambiguous = {}
 
     for pidx in param_indices:
         group_labels = [lab for lab, (p, _) in parsed.items() if p == pidx]
-        group = theta_1p.loc[group_labels, all_params]
+        group_labels = group_labels + fiducial_labels  # shared center point
+        group = theta_1p.loc[group_labels, candidates]
 
         ranges = group.max() - group.min()
         varying = list(ranges[ranges > tol].index)
@@ -86,25 +111,30 @@ def infer_1p_parameter_names(theta_1p, all_params, tol=1e-8):
 
 def group_steps(sim_ids, param_index):
     """
-    Given a 1P run's `sim_ids` (string labels "p<N>_<M>") and a target
-    `param_index`, return the subset of labels belonging to that parameter,
-    sorted by step_index.
+    Given a 1P run's `sim_ids` and a target `param_index`, return the
+    subset of labels belonging to that parameter PLUS the shared fiducial
+    label (if present in `sim_ids`), sorted by step_index.
     """
-    labels = [s for s in sim_ids if parse_1p_label(s)[0] == param_index]
-    return sorted(labels, key=lambda s: parse_1p_label(s)[1])
+    parsed = {s: parse_1p_label(s) for s in sim_ids}
+    labels = [
+        s for s, (p, _) in parsed.items() if p == param_index or p is None
+    ]
+    return sorted(labels, key=lambda s: parsed[s][1])
 
 
 def mean_cdf_by_step(summaries, sim_ids, param_index, n_k, n_r):
     """
     For one target parameter, average `summaries` over any repeated steps
     (multiple seeds at the same step_index, if present) and return the
-    per-step mean CDFs alongside their step indices and parameter values.
+    per-step mean CDFs alongside their step indices. The shared fiducial
+    (label "0", if present in `sim_ids`) is included as every parameter's
+    step-0 point.
 
     Parameters
     ----------
     summaries   : (n_sims, n_k*n_r) kNN-CDF summaries, aligned to sim_ids
-    sim_ids     : string labels "p<N>_<M>", same order as summaries' rows
-    param_index : which parameter (1-based, per parse_1p_label) to group by
+    sim_ids     : 1P labels, same order as summaries' rows
+    param_index : which parameter (per parse_1p_label) to group by
 
     Returns
     -------
@@ -112,8 +142,9 @@ def mean_cdf_by_step(summaries, sim_ids, param_index, n_k, n_r):
     mean_cdfs    : ndarray (n_steps, n_k, n_r), mean summary at each step
     """
     sim_ids = np.asarray(sim_ids)
-    steps = np.array([parse_1p_label(s)[1] for s in sim_ids])
-    is_param = np.array([parse_1p_label(s)[0] == param_index for s in sim_ids])
+    parsed = [parse_1p_label(s) for s in sim_ids]
+    steps = np.array([s for _, s in parsed])
+    is_param = np.array([p == param_index or p is None for p, _ in parsed])
 
     step_indices = np.sort(np.unique(steps[is_param]))
     mean_cdfs = np.empty((len(step_indices), n_k, n_r))
@@ -131,7 +162,10 @@ def monotonic_trend(step_values, response_at_r):
     response (e.g. mean-CDF value at one r, for one k), as a cheap,
     ordered-data-appropriate stand-in for the permutation test LH uses --
     a handful of ordered grid points isn't where a shuffle-label null makes
-    sense the way it does at 1000 simulations.
+    sense the way it does at 1000 simulations. With no repeated seeds per
+    step in a typical 1P release, each point is a single noisy realization,
+    so treat a significant result here as a lead, not a confirmed detection
+    at LH's standard of rigor.
 
     Returns (rho, p_value). Needs at least 3 distinct steps.
     """

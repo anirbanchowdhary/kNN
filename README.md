@@ -159,16 +159,31 @@ pytest tests/
   count. Every other parameter's apparent signal *shrank* and none remain
   significant after FDR correction — `sigma_8`'s notebook-01 significance
   doesn't survive. **Only `Omega_m` is a real signal in the LH set.**
-- Notebooks 03 (mass-selected control) and 04 (1P sweep) exist to check two
-  explanations for the feedback null before treating it as settled: that the
-  AGN kNN-CDF is substantially tracing halo mass (which luminosity selection
-  doesn't add to), and that LH's 5-parameter marginalization noise is hiding
-  a real-but-small feedback signal that 1P's single-parameter sweeps would
-  reveal. Not yet run against real data — see each notebook's own "Reading
-  this" section for how to interpret the result either way.
+- **Mass-selected control** (notebook 03, real-data run): mass-selected
+  `Omega_m` (R=0.0192) closely matches AGN's (R=0.0207, ratio 0.93) —
+  consistent with the AGN kNN-CDF substantially tracing halo mass, which
+  luminosity selection doesn't add much to. But **`A_SN1` is significant
+  under mass-selection (R=0.0047, q=0.0015) and null under
+  luminosity-selection (R=0.00097, q=0.85)**, a 4.8× ratio — luminosity
+  selection may be actively washing out an SN-feedback signal that's visible
+  in raw mass-selected clustering. Worth a closer look, not yet explained.
+- **1P sweep** (notebook 04): this suite's 1P set turned out to vary 28
+  astrophysics parameters (`WindEnergyIn1e51erg`, `RadioFeedbackFactor`, ...),
+  not the LH run's 4 lumped ones — a finer decomposition with no 1:1 name
+  match, discovered empirically (see `src/onep.py`'s module docstring) after
+  an initial wrong assumption about the directory naming convention. Only
+  `Omega_m`/`sigma_8` are directly comparable to LH; the 28 astrophysics
+  columns are ranked on their own terms (FDR-corrected separately from the
+  cosmological pair) for whether *any* of them shows a real trend that a
+  literal `A_SN1`-style re-test can't answer. Not yet run against real data
+  past the fix — see the notebook's own "Reading this" section.
 
 ## Roadmap (not built yet)
 
+- **Why does luminosity selection null out `A_SN1`** when mass-selection at
+  the identical N doesn't (notebook 03's biggest open question)? Worth
+  checking whether it's specific to `A_SN1` or shows up for other feedback
+  parameters at different N/snapshots before reading much into it.
 - **Degeneracy**: whether two parameters (e.g. `Omega_m` and `A_AGN1`) leave
   similar-looking imprints the kNN-CDF alone can't tell apart. Lower priority
   until a second parameter shows a real signal (currently only `Omega_m`
