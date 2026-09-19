@@ -12,10 +12,17 @@ from src.onep import (
 
 
 def test_parse_1p_label():
-    assert parse_1p_label("1_3") == (1, 3)
-    assert parse_1p_label("6_0") == (6, 0)
-    assert parse_1p_label("1_n2") == (1, -2)
-    assert parse_1p_label("28_n1") == (28, -1)
+    assert parse_1p_label("p1_3") == (1, 3)
+    assert parse_1p_label("p6_0") == (6, 0)
+    assert parse_1p_label("p1_n2") == (1, -2)
+    assert parse_1p_label("p28_n1") == (28, -1)
+
+
+def test_parse_1p_label_double_digit_index():
+    # regression: a naive single-digit regex would silently mis-parse or
+    # reject this -- caught by a real error report against actual data
+    assert parse_1p_label("p10_1") == (10, 1)
+    assert parse_1p_label("p10_n1") == (10, -1)
 
 
 def test_parse_1p_label_fiducial():
@@ -24,7 +31,7 @@ def test_parse_1p_label_fiducial():
 
 
 def test_parse_1p_label_rejects_bad_format():
-    for bad in ["LH_1", "p1_3", "1", "1_", "abc", "1_2_3", "1_n"]:
+    for bad in ["LH_1", "1_3", "1", "p1_", "abc", "p1_2_3", "p1_n", "p1"]:
         with pytest.raises(ValueError):
             parse_1p_label(bad)
 
@@ -42,7 +49,7 @@ def _synthetic_1p_theta(all_params, steps=(-2, -1, 1, 2), seed=0):
     rows = {"0": dict(fiducial)}
     for pidx, target in enumerate(all_params, start=1):
         for step in steps:
-            label = f"{pidx}_{step}" if step >= 0 else f"{pidx}_n{abs(step)}"
+            label = f"p{pidx}_{step}" if step >= 0 else f"p{pidx}_n{abs(step)}"
             row = dict(fiducial)
             row[target] = fiducial[target] + step * 0.05
             rows[label] = row
@@ -80,7 +87,7 @@ def test_infer_1p_parameter_names_flags_ambiguous_group():
 
     # Break group 1: make a second column vary too, so it's no longer
     # exactly-one-varying-column.
-    group1 = [lab for lab in theta_1p.index if lab.startswith("1_")]
+    group1 = [lab for lab in theta_1p.index if lab.startswith("p1_")]
     theta_1p.loc[group1, "sigma8"] = np.linspace(0.1, 0.9, len(group1))
 
     mapping, ambiguous = infer_1p_parameter_names(theta_1p)
@@ -91,20 +98,39 @@ def test_infer_1p_parameter_names_flags_ambiguous_group():
     assert mapping[2] == "sigma8"
 
 
+def test_infer_1p_parameter_names_handles_double_digit_indices():
+    # 10 parameters so index 10 exists alongside single-digit ones -- a
+    # startswith("p1_") style prefix filter would wrongly also match "p10_*"
+    params = [f"Astro{i}" for i in range(1, 11)]
+    theta_1p = _synthetic_1p_theta(params)
+
+    mapping, ambiguous = infer_1p_parameter_names(theta_1p)
+
+    assert ambiguous == {}
+    assert mapping[1] == "Astro1"
+    assert mapping[10] == "Astro10"
+
+
 def test_group_steps_filters_sorts_and_includes_shared_fiducial():
-    sim_ids = ["2_1", "1_3", "1_n1", "3_0", "1_1", "0"]
-    assert group_steps(sim_ids, 1) == ["1_n1", "0", "1_1", "1_3"]
-    # "3_0" and "0" are tied at step 0; the sort is stable but their
+    sim_ids = ["p2_1", "p1_3", "p1_n1", "p3_0", "p1_1", "0"]
+    assert group_steps(sim_ids, 1) == ["p1_n1", "0", "p1_1", "p1_3"]
+    # "p3_0" and "0" are tied at step 0; the sort is stable but their
     # relative order isn't semantically meaningful, so compare as a set
-    assert set(group_steps(sim_ids, 3)) == {"0", "3_0"}
+    assert set(group_steps(sim_ids, 3)) == {"0", "p3_0"}
     assert group_steps(sim_ids, 9) == ["0"]  # fiducial still shared even for an unseen parameter
+
+
+def test_group_steps_double_digit_index_not_confused_with_single_digit():
+    sim_ids = ["p1_1", "p10_1", "p10_2", "0"]
+    assert group_steps(sim_ids, 1) == ["0", "p1_1"]
+    assert set(group_steps(sim_ids, 10)) == {"0", "p10_1", "p10_2"}
 
 
 def test_mean_cdf_by_step_averages_repeated_steps_and_includes_fiducial():
     n_k, n_r = 2, 3
     # param 1 has two sims at step 1 (different seeds), one at step 2, and
     # the shared fiducial ("0") which must be pulled in as its step-0 point
-    sim_ids = ["1_1", "1_1", "1_2", "2_1", "0"]
+    sim_ids = ["p1_1", "p1_1", "p1_2", "p2_1", "0"]
     summaries = np.array([
         np.full(n_k * n_r, 1.0),
         np.full(n_k * n_r, 3.0),    # step 1 mean should be 2.0

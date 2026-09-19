@@ -4,15 +4,15 @@ fiducial. The point of 1P is to check whether a parameter that's null in
 the LH quartile-contrast test (marginalized over the other 5, with seed
 noise) is truly null, or just swamped by that marginalization.
 
-Directory convention (verified against real CAMELS-IllustrisTNG 1P data --
-NOT the `1P_p<N>_<M>` form originally assumed): after stripping the `1P_`
+Directory convention (verified against real CAMELS-IllustrisTNG 1P data,
+including a double-digit index like `1P_p10_1`): after stripping the `1P_`
 prefix, labels are
 
-    "0"          the single shared fiducial point, reused across every
-                 parameter's sweep (all parameters sit at their fiducial
-                 value here) -- not its own separate parameter group
-    "<N>_<M>"    parameter N, positive step M
-    "<N>_n<M>"   parameter N, negative step M (e.g. "1_n2" -> step -2)
+    "0"           the single shared fiducial point, reused across every
+                  parameter's sweep (all parameters sit at their fiducial
+                  value here) -- not its own separate parameter group
+    "p<N>_<M>"    parameter N, positive step M
+    "p<N>_n<M>"   parameter N, negative step M (e.g. "p1_n2" -> step -2)
 
 The exact grid size, step spacing, whether multiple seeds exist per step,
 and how many parameters are varied are release-specific and not hardcoded
@@ -35,12 +35,13 @@ import numpy as np
 # check, never to force-map the astrophysics columns.
 COSMO_ALIASES = {"Omega0": "Omega_m", "sigma8": "sigma_8"}
 
-_LABEL_RE = re.compile(r"^(\d+)_(n)?(\d+)$")
+_LABEL_RE = re.compile(r"^p(\d+)_(n)?(\d+)$")
 
 
 def parse_1p_label(label):
     """
-    "1_3" -> (1, 3), "1_n2" -> (1, -2): (param_index, step_index).
+    "p1_3" -> (1, 3), "p1_n2" -> (1, -2), "p10_1" -> (10, 1):
+    (param_index, step_index).
     "0" (the shared fiducial) -> (None, 0) -- it belongs to every
     parameter's group, not a parameter of its own.
     Raises ValueError on anything else.
@@ -51,7 +52,7 @@ def parse_1p_label(label):
     m = _LABEL_RE.match(label)
     if not m:
         raise ValueError(
-            f"'{label}' is not a 1P label of the form '<N>_<M>', '<N>_n<M>', or '0'"
+            f"'{label}' is not a 1P label of the form 'p<N>_<M>', 'p<N>_n<M>', or '0'"
         )
     param_index, negative, step = m.groups()
     step = int(step)
