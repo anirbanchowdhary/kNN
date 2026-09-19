@@ -50,22 +50,36 @@ Parameters/IllustrisTNG/L25n256/LH/CosmoAstroSeed_IllustrisTNG_L25n256_LH.txt
 
 ```
 src/
-  config.py            constants: box size, snapshot, selection cuts, kNN grid, paths
-  data_io.py            find_snapshots(), read_bh_catalog()
-  selection.py           bolometric luminosity, Eddington ratio, top-fraction AGN selection
+  config.py            constants: box size, snapshot, selection cuts, kNN grid,
+                        LH and 1P paths
+  data_io.py            find_snapshots()/parse_dir_label() (LH and 1P, via `prefix`),
+                         read_bh_catalog()
+  selection.py           bolometric luminosity, Eddington ratio; top-fraction,
+                          fixed-N luminosity, and fixed-N mass selection
   knn_cdf.py              the kNN-CDF statistic itself
-  params.py                 LH parameter table loading + sim_id-keyed alignment
+  params.py                 LH/1P parameter table loading + sim_id-keyed alignment
   pipeline.py                run_suite(): every snapshot -> one .npz of summaries
+                              (LH or 1P, luminosity- or mass-selected)
+  onep.py                     1P label parsing, p<N>-name inference, per-step
+                               CDF grouping, trend test
   abundance.py                 remove the "more AGN -> different CDF" trend
-  selection_bias.py             luminosity-cut bias diagnostics + nbh-confound correction
-  sensitivity.py                 scale-resolved + scalar parameter response, with bootstrap/null
-  plotting.py                     figures for sensitivity_table() output
+                                (top-fraction selection only)
+  selection_bias.py             luminosity-cut bias diagnostics + nbh-confound
+                                 correction
+  sensitivity.py                 scale-resolved + scalar parameter response,
+                                  with bootstrap/null, FDR-adjusted significance
+  plotting.py                     figures: scale response, sensitivity bar
+                                   (with null floor), 1P sweep
 notebooks/
   01_agn_luminosity_knn_sensitivity.ipynb   top-10%-by-luminosity run (executed)
   02_fixed_density_agn_knn.ipynb             fixed-number-density run + comparison
+  03_mass_selected_control.ipynb             mass- vs. luminosity-selected, same N
+  04_1p_parameter_sweep.ipynb                 1P sweep: is feedback swamped by LH
+                                               marginalization, or really null?
 tests/
-  synthetic-data unit tests for knn_cdf, abundance, sensitivity, and the
-  sim_id alignment logic (no simulation data required to run these)
+  synthetic-data / fake-I/O unit tests for every module above (no simulation
+  data required to run these) — including a pipeline.run_suite() integration
+  test with find_snapshots/read_bh_catalog monkeypatched
 ```
 
 ## Design choices worth knowing about
@@ -124,20 +138,44 @@ tests/
 ## Running
 
 No CAMELS simulation data ships with this repo. Point `SIM_PATH` /
-`PARAMS_FILE` in `src/config.py` (or the notebook's config cell) at your local
-copy, then run `notebooks/01_agn_luminosity_knn_sensitivity.ipynb` top to
-bottom. `pytest` runs independently of any real data:
+`PARAMS_FILE` (and `SIM_PATH_1P`/`PARAMS_FILE_1P` for notebook 04) in
+`src/config.py` at your local copy, then run the notebooks in order —
+01 → 02 → 03/04 (03 and 04 both depend on 02's saved `.npz` for `N_TARGET`,
+not on each other). `pytest` runs independently of any real data:
 
 ```
 pip install -r requirements.txt
 pytest tests/
 ```
 
+## Findings so far (real-data runs, snap=50)
+
+- **Top-10%-by-luminosity** (notebook 01): `Omega_m` and `sigma_8` both looked
+  significant.
+- **Fixed number density** (notebook 02, the corrected selection): `Omega_m`'s
+  signal more than *doubled* (R: 0.0079 → 0.0207) — the top-fraction result
+  was, if anything, an underestimate, because its abundance correction
+  couldn't fully separate `Omega_m` from its ρ=0.98 correlation with AGN
+  count. Every other parameter's apparent signal *shrank* and none remain
+  significant after FDR correction — `sigma_8`'s notebook-01 significance
+  doesn't survive. **Only `Omega_m` is a real signal in the LH set.**
+- Notebooks 03 (mass-selected control) and 04 (1P sweep) exist to check two
+  explanations for the feedback null before treating it as settled: that the
+  AGN kNN-CDF is substantially tracing halo mass (which luminosity selection
+  doesn't add to), and that LH's 5-parameter marginalization noise is hiding
+  a real-but-small feedback signal that 1P's single-parameter sweeps would
+  reveal. Not yet run against real data — see each notebook's own "Reading
+  this" section for how to interpret the result either way.
+
 ## Roadmap (not built yet)
 
-This first version answers *whether and where* each of the 6 parameters
-imprints on the AGN kNN-CDF, one parameter at a time. The natural next step —
-**degeneracy**: whether two parameters (e.g. `Omega_m` and `A_AGN1`) leave
-similar-looking imprints that the kNN-CDF alone can't tell apart — is
-intentionally out of scope here and will build on top of this pipeline once
-the single-parameter results are validated against real data.
+- **Degeneracy**: whether two parameters (e.g. `Omega_m` and `A_AGN1`) leave
+  similar-looking imprints the kNN-CDF alone can't tell apart. Lower priority
+  until a second parameter shows a real signal (currently only `Omega_m`
+  does) — a Fisher/covariance analysis has nothing to act on with one axis.
+- **CV set** (27 sims, fiducial parameters, different seeds) as a
+  cosmic-variance noise floor, to turn `R(p)` into an interpretable S/N
+  rather than a bare number compared to its own permutation null.
+- Robustness: does the `Omega_m` result hold across different `N_TARGET`,
+  other snapshots/redshifts, and an Eddington-ratio (rather than luminosity)
+  selection?

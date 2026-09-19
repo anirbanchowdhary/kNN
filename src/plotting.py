@@ -1,9 +1,59 @@
 """
-Figures for the sensitivity_table() output.
+Figures for the sensitivity_table() output, and for the 1P parameter sweep.
 """
 
 import numpy as np
 import matplotlib.pyplot as plt
+
+
+def plot_1p_sweep(rgrid, kvals, step_values, mean_cdfs, parameter_name,
+                   figsize=None, logx=True):
+    """
+    One panel per k: the mean kNN-CDF at every 1P grid step for one
+    parameter, colored by the parameter's value at that step. A different
+    question from `plot_scale_response`'s quartile-contrast + null test --
+    with marginalization noise gone (single parameter varied, others at
+    fiducial), the first thing to check is simply whether the CDF moves
+    smoothly/monotonically with the parameter at all.
+
+    Parameters
+    ----------
+    rgrid          : (n_r,) radial bin centres
+    kvals          : sequence of k values, length n_k
+    step_values    : (n_steps,) the parameter's actual value at each step
+                     (not just a step index -- read from the 1P params table)
+    mean_cdfs      : (n_steps, n_k, n_r) mean kNN-CDF at each step
+    parameter_name : for the title
+    """
+    n_k = len(kvals)
+    if figsize is None:
+        figsize = (4.2 * n_k, 3.4)
+
+    fig, axes = plt.subplots(1, n_k, figsize=figsize, squeeze=False)
+    axes = axes[0]
+
+    cmap = plt.get_cmap("viridis")
+    vmin, vmax = np.min(step_values), np.max(step_values)
+    norm = plt.Normalize(vmin=vmin, vmax=vmax)
+
+    for ki in range(n_k):
+        ax = axes[ki]
+        for i, v in enumerate(step_values):
+            ax.plot(rgrid, mean_cdfs[i, ki], color=cmap(norm(v)), lw=1.4)
+        if logx:
+            ax.set_xscale("log")
+        ax.set_xlabel(r"$r\ [\mathrm{Mpc}/h]$")
+        ax.set_title(f"k={kvals[ki]}")
+        ax.spines[["top", "right"]].set_visible(False)
+
+    axes[0].set_ylabel("mean kNN-CDF")
+
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+    fig.colorbar(sm, ax=axes, label=parameter_name, fraction=0.05, pad=0.02)
+
+    fig.suptitle(f"1P sweep: {parameter_name}", y=1.05)
+    return fig, axes
 
 
 def plot_scale_response(table, parameter, ax=None, figsize=(7, 4), logx=True):

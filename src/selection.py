@@ -26,6 +26,35 @@ def eddington_ratio(bh_mass, lbol):
     return lbol / ledd
 
 
+def mass_eligible_mask(bh_mass, mass_cut):
+    """BHs above the mass floor -- no luminosity requirement."""
+    return bh_mass > mass_cut
+
+
+def select_most_massive_n(bh_mass, mass_cut, n_target):
+    """
+    Boolean mask selecting exactly the `n_target` most massive BHs above
+    `mass_cut`.
+
+    The mass-selected counterpart to `select_brightest_n`: same fixed-N
+    contract (all-False when fewer than `n_target` are eligible), so it can
+    be swapped in for a controlled comparison at identical tracer density --
+    "does luminosity selection add clustering information beyond host-halo
+    mass, which Omega_m sets and feedback mostly doesn't?".
+    """
+    eligible = mass_eligible_mask(bh_mass, mass_cut)
+
+    if eligible.sum() < n_target:
+        return np.zeros(len(bh_mass), dtype=bool)
+
+    idx = np.flatnonzero(eligible)
+    most_massive = idx[np.argsort(bh_mass[idx])[::-1][:n_target]]
+
+    mask = np.zeros(len(bh_mass), dtype=bool)
+    mask[most_massive] = True
+    return mask
+
+
 def eligible_mask(bh_mass, bh_mdot, mass_cut):
     """BHs above the mass floor with a finite, positive luminosity."""
     lbol = bolometric_luminosity(bh_mdot)

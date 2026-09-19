@@ -15,23 +15,37 @@ import hdf5plugin  # noqa: F401  (registers the compression filters used by CAME
 import numpy as np
 
 
-def find_snapshots(sim_path, snap):
+def find_snapshots(sim_path, snap, prefix="LH_"):
     """
-    Return the sorted list of snapshot file paths, one per LH simulation,
-    for a given snapshot number.
+    Return the sorted list of snapshot file paths, one per simulation
+    directory under `sim_path` whose name starts with `prefix`, for a given
+    snapshot number.
+
+    `prefix` generalizes this beyond the LH set: CAMELS's 1P set uses
+    `1P_p<param>_<step>` directories at the same nesting level, sitting
+    alongside `LH_<id>`.
     """
     snap_name = f"snapshot_{snap:03d}.hdf5"
     with os.scandir(sim_path) as top:
         return sorted(
             os.path.join(entry.path, snap_name)
             for entry in top
-            if entry.is_dir(follow_symlinks=False) and entry.name.startswith("LH_")
+            if entry.is_dir(follow_symlinks=False) and entry.name.startswith(prefix)
         )
+
+
+def parse_dir_label(path, prefix):
+    """
+    Extract the simulation-directory label following `prefix` from a
+    snapshot path, e.g. `parse_dir_label(".../LH_42/snapshot_050.hdf5", "LH_")
+    == "42"`, or `parse_dir_label(".../1P_p1_3/...", "1P_") == "p1_3"`.
+    """
+    return path.split(prefix)[1].split("/")[0]
 
 
 def sim_id_from_path(path):
     """Extract the integer LH simulation id from a snapshot path."""
-    return int(path.split("LH_")[1].split("/")[0])
+    return int(parse_dir_label(path, "LH_"))
 
 
 def read_bh_catalog(snapshot_path):

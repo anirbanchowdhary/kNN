@@ -74,3 +74,21 @@ PARAMS_FILE = (
     f"CosmoAstroSeed_{SUITE}_{GENERATION}_{SET_NAME}.txt"
 )
 OUTPUT_DIR = "../outputs"
+
+# ----------------------------------------------------------------------
+# 1P set (one parameter varied at a time, others held at fiducial)
+# ----------------------------------------------------------------------
+# Directories are named 1P_p<param_index>_<step_index> (e.g. 1P_p1_3),
+# sitting alongside LH at the same Generation level. Built the same way as
+# SIM_PATH/PARAMS_FILE above, mirroring the layout confirmed for LH -- not
+# independently verified for 1P, since this account's data doesn't have it
+# yet; notebook 04 checks this against what's actually on disk before
+# relying on it (see infer_1p_parameter_names in src/onep.py).
+
+SET_NAME_1P = "1P"
+
+SIM_PATH_1P = f"{DATA_ROOT}/Sims/{SUITE}/{GENERATION}/{SET_NAME_1P}"
+PARAMS_FILE_1P = (
+    f"{DATA_ROOT}/Sims/{SUITE}/{GENERATION}/{SET_NAME_1P}/"
+    f"CosmoAstroSeed_{SUITE}_{GENERATION}_{SET_NAME_1P}.txt"
+)
