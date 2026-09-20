@@ -178,3 +178,35 @@ def plot_sensitivity_bar(summary_df, cosmo_params, astro_params, ax=None, figsiz
 
     fig.tight_layout()
     return fig, ax
+
+
+def plot_bin_correlation(rgrid, kvals, corr, ax=None, figsize=(7, 4), logx=True):
+    """
+    `complementarity.bin_correlation`'s (n_k, n_r) output, one line per k.
+
+    Near +-1: the two tracers' fluctuations move together at that scale
+    (redundant). Near 0: independent (complementary). Unlike
+    `plot_scale_response`, there's no null band here -- this is a
+    descriptive correlation, not a significance test against a parameter.
+    """
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figsize)
+    else:
+        fig = ax.figure
+
+    n_k = len(kvals)
+    cmap = plt.get_cmap("viridis")
+    for ki in range(n_k):
+        colour = cmap(ki / max(n_k - 1, 1))
+        ax.plot(rgrid, corr[ki], color=colour, lw=1.6, label=f"k={kvals[ki]}")
+
+    ax.axhline(0.0, color="0.3", lw=0.8)
+    ax.set_ylim(-1.05, 1.05)
+    if logx:
+        ax.set_xscale("log")
+    ax.set_xlabel(r"$r\ [\mathrm{Mpc}/h]$")
+    ax.set_ylabel("per-bin correlation (across sims)")
+    ax.legend(fontsize=8, framealpha=0.9)
+    ax.spines[["top", "right"]].set_visible(False)
+    fig.tight_layout()
+    return fig, ax

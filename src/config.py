@@ -112,3 +112,19 @@ PARAMS_FILE_CV = (
     f"{DATA_ROOT}/Sims/{SUITE}/{GENERATION}/{SET_NAME_CV}/"
     f"CosmoAstroSeed_{SUITE}_{GENERATION}_{SET_NAME_CV}.txt"
 )
+
+# ----------------------------------------------------------------------
+# Galaxy (subhalo) selection, for a tracer comparison against AGN
+# ----------------------------------------------------------------------
+# "Galaxies" here means SubFind subhalos, a separate CAMELS data product
+# (Type "Groups", one group-catalog file per realization, same directory
+# naming as Sims) from the particle snapshots AGN are read from -- not the
+# same file, and not independently verified against this account's actual
+# data yet, so notebook 06 discovers what's on disk (find_group_catalogs)
+# before relying on GROUPS_PATH or the SubhaloMassType layout assumed by
+# read_galaxy_catalog.
+
+GALAXY_MASS_CUT = 1e8      # Msun, base stellar-mass floor before fixed-N ranking
+MIN_GALAXIES = 5             # minimum retained galaxies for a sim to be usable
+
+GROUPS_PATH = f"{DATA_ROOT}/Groups/{SUITE}/{GENERATION}/{SET_NAME}"

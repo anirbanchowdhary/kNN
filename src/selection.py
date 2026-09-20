@@ -97,6 +97,37 @@ def select_brightest_n(bh_mass, bh_mdot, mass_cut, n_target):
     return mask
 
 
+def galaxy_eligible_mask(stellar_mass, flag, mass_cut):
+    """Subhalos above the stellar-mass floor that SubFind didn't flag as spurious."""
+    return flag & (stellar_mass > mass_cut)
+
+
+def count_eligible_galaxies(stellar_mass, flag, mass_cut):
+    """How many subhalos could be selected from, before any mass ranking."""
+    return int(galaxy_eligible_mask(stellar_mass, flag, mass_cut).sum())
+
+
+def select_most_massive_galaxies_n(stellar_mass, flag, mass_cut, n_target):
+    """
+    Boolean mask selecting exactly the `n_target` most massive (by stellar
+    mass) eligible subhalos -- the galaxy analog of `select_most_massive_n`,
+    with SubFind's spurious-subhalo flag applied as an extra eligibility
+    requirement BHs have no equivalent of. Same fixed-N contract: all-False
+    when fewer than `n_target` are eligible.
+    """
+    eligible = galaxy_eligible_mask(stellar_mass, flag, mass_cut)
+
+    if eligible.sum() < n_target:
+        return np.zeros(len(stellar_mass), dtype=bool)
+
+    idx = np.flatnonzero(eligible)
+    most_massive = idx[np.argsort(stellar_mass[idx])[::-1][:n_target]]
+
+    mask = np.zeros(len(stellar_mass), dtype=bool)
+    mask[most_massive] = True
+    return mask
+
+
 def select_luminous_agn(bh_mass, bh_mdot, mass_cut, top_fraction):
     """
     Boolean mask selecting the top `top_fraction` of BHs by bolometric

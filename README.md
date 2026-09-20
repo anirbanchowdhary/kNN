@@ -45,41 +45,64 @@ Parameters/IllustrisTNG/L25n256/LH/CosmoAstroSeed_IllustrisTNG_L25n256_LH.txt
 - The parameter table (`CosmoAstroSeed_<suite>_<generation>_<set>.txt`) is
   whitespace-delimited; its first column is `LH_<id>` and the other columns
   are the 6 parameters above plus the random seed.
+- **Galaxies** (notebook 06) come from a separate CAMELS data product:
+  SubFind group/subhalo catalogs, assumed at
+  `Groups/<suite>/<generation>/<set>/<realization>/groups_<snap:03d>.hdf5`
+  (`GROUPS_PATH` in `src/config.py`), with a `Subhalo` HDF5 group holding
+  `SubhaloPos` and `SubhaloMassType` (6 columns, index 4 = stellar mass).
+  This layout is **not independently verified** against this account's
+  data — notebook 06's first cell opens whatever it finds and prints the
+  actual keys before anything downstream relies on it, the same discipline
+  used for the 1P and CV sets.
 
 ## Layout
 
 ```
 src/
   config.py            constants: box size, snapshot, selection cuts, kNN grid,
-                        LH and 1P paths
-  data_io.py            find_snapshots()/parse_dir_label() (LH and 1P, via `prefix`),
-                         read_bh_catalog()
+                        LH, 1P, CV, and Groups (galaxy) paths
+  data_io.py            find_snapshots()/parse_dir_label()/read_bh_catalog()
+                         (LH, 1P, CV, via `prefix`); find_group_catalogs()/
+                         read_galaxy_catalog() for the galaxy tracer
   selection.py           bolometric luminosity, Eddington ratio; top-fraction,
-                          fixed-N luminosity, and fixed-N mass selection
+                          fixed-N luminosity, and fixed-N mass selection (BH);
+                          fixed-N stellar-mass selection (galaxy)
   knn_cdf.py              the kNN-CDF statistic itself
-  params.py                 LH/1P parameter table loading + sim_id-keyed alignment
+  params.py                 LH/1P/CV parameter table loading + sim_id-keyed alignment
   pipeline.py                run_suite(): every snapshot -> one .npz of summaries
-                              (LH or 1P, luminosity- or mass-selected)
+                              (LH, 1P, or CV; luminosity- or mass-selected AGN);
+                              run_galaxy_suite(): the same, over group catalogs
   onep.py                     1P label parsing, p<N>-name inference, per-step
                                CDF grouping, trend test
+  cv.py                        CV-set cosmic-variance noise floor (per-bin std,
+                                scalar RMS, signal-to-noise)
   abundance.py                 remove the "more AGN -> different CDF" trend
                                 (top-fraction selection only)
   selection_bias.py             luminosity-cut bias diagnostics + nbh-confound
                                  correction
   sensitivity.py                 scale-resolved + scalar parameter response,
                                   with bootstrap/null, FDR-adjusted significance
+  complementarity.py              cross-tracer per-bin correlation (AGN vs.
+                                   galaxies): redundant vs. complementary information
   plotting.py                     figures: scale response, sensitivity bar
-                                   (with null floor), 1P sweep
+                                   (with null floor), 1P sweep, cross-tracer correlation
 notebooks/
   01_agn_luminosity_knn_sensitivity.ipynb   top-10%-by-luminosity run (executed)
   02_fixed_density_agn_knn.ipynb             fixed-number-density run + comparison
   03_mass_selected_control.ipynb             mass- vs. luminosity-selected, same N
   04_1p_parameter_sweep.ipynb                 1P sweep: is feedback swamped by LH
                                                marginalization, or really null?
+  05_cv_noise_floor.ipynb                     CV set: cosmic-variance noise floor,
+                                               checked against both the LH Omega_m
+                                               signal and the 1P sweep's ranking
+  06_galaxy_agn_complementarity.ipynb          galaxies vs. AGN: same-parameter
+                                                sensitivity comparison + direct
+                                                cross-tracer correlation check
 tests/
   synthetic-data / fake-I/O unit tests for every module above (no simulation
-  data required to run these) — including a pipeline.run_suite() integration
-  test with find_snapshots/read_bh_catalog monkeypatched
+  data required to run these) — including pipeline.run_suite()/run_galaxy_suite()
+  integration tests with find_snapshots/read_bh_catalog/find_group_catalogs/
+  read_galaxy_catalog monkeypatched
 ```
 
 ## Design choices worth knowing about
@@ -138,10 +161,12 @@ tests/
 ## Running
 
 No CAMELS simulation data ships with this repo. Point `SIM_PATH` /
-`PARAMS_FILE` (and `SIM_PATH_1P`/`PARAMS_FILE_1P` for notebook 04) in
-`src/config.py` at your local copy, then run the notebooks in order —
-01 → 02 → 03/04 (03 and 04 both depend on 02's saved `.npz` for `N_TARGET`,
-not on each other). `pytest` runs independently of any real data:
+`PARAMS_FILE` (`SIM_PATH_1P`/`PARAMS_FILE_1P` for notebook 04,
+`SIM_PATH_CV`/`PARAMS_FILE_CV` for notebook 05, `GROUPS_PATH` for notebook
+06) in `src/config.py` at your local copy, then run the notebooks in order
+— 01 → 02 → 03/04/05/06 (03, 04, 05, and 06 all depend on 02's saved
+`.npz` for `N_TARGET`, not on each other). `pytest` runs independently of
+any real data:
 
 ```
 pip install -r requirements.txt
@@ -167,16 +192,29 @@ pytest tests/
   luminosity-selection (R=0.00097, q=0.85)**, a 4.8× ratio — luminosity
   selection may be actively washing out an SN-feedback signal that's visible
   in raw mass-selected clustering. Worth a closer look, not yet explained.
-- **1P sweep** (notebook 04): this suite's 1P set turned out to vary 28
-  astrophysics parameters (`WindEnergyIn1e51erg`, `RadioFeedbackFactor`, ...),
-  not the LH run's 4 lumped ones — a finer decomposition with no 1:1 name
-  match, discovered empirically (see `src/onep.py`'s module docstring) after
-  an initial wrong assumption about the directory naming convention. Only
-  `Omega_m`/`sigma_8` are directly comparable to LH; the 28 astrophysics
-  columns are ranked on their own terms (FDR-corrected separately from the
-  cosmological pair) for whether *any* of them shows a real trend that a
-  literal `A_SN1`-style re-test can't answer. Not yet run against real data
-  past the fix — see the notebook's own "Reading this" section.
+- **1P sweep** (notebook 04, real-data run): this suite's 1P set turned out
+  to vary 28 astrophysics parameters (`WindEnergyIn1e51erg`,
+  `RadioFeedbackFactor`, ...), not the LH run's 4 lumped ones — a finer
+  decomposition with no 1:1 name match, discovered empirically (see
+  `src/onep.py`'s module docstring) after an initial wrong assumption about
+  the directory naming convention, plus a real label-grammar bug
+  (`p10_1`-style labels) fixed along the way. Only `Omega_m`/`sigma_8` are
+  directly comparable to LH. Also fixed here: `scipy.stats.spearmanr`'s
+  default p-value is badly wrong at this sample size (n≈5 per parameter) —
+  an *exact* permutation p-value replaced it. Honest result: **nothing
+  clears FDR-corrected significance at n≈5**, not even `Omega_m` — a
+  small-n limitation of the test, not evidence the LH `Omega_m` signal is
+  wrong (see notebook 05).
+- **CV noise floor** (notebook 05, real-data run): the pure seed-to-seed
+  scatter (27 fiducial realizations) gives a direct physical noise floor,
+  independent of any permutation test. `Omega_m`'s LH response sits at
+  ~1.3x that floor — modest but real, and comfortably above 1 even though
+  its 1P permutation q-value doesn't clear significance, which is exactly
+  what "the small-n permutation test is the limiting factor, not a weak
+  `Omega_m` signal" looks like. Ranking all 28 1P astrophysics parameters
+  by CV signal-to-noise, `n_s` (spectral index) comes out highest (1.44x,
+  mildly surprising), `Omega0` second (0.91x) — nothing else decisively
+  clears the noise.
 
 ## Roadmap (not built yet)
 
@@ -188,9 +226,15 @@ pytest tests/
   similar-looking imprints the kNN-CDF alone can't tell apart. Lower priority
   until a second parameter shows a real signal (currently only `Omega_m`
   does) — a Fisher/covariance analysis has nothing to act on with one axis.
-- **CV set** (27 sims, fiducial parameters, different seeds) as a
-  cosmic-variance noise floor, to turn `R(p)` into an interpretable S/N
-  rather than a bare number compared to its own permutation null.
+- **Galaxy tracer** (notebook 06, built but not yet run against real data):
+  SubFind subhalos, fixed-N by stellar mass, compared against AGN both by
+  per-parameter sensitivity and by a direct cross-tracer per-bin
+  correlation across the LH suite (`src/complementarity.py`) — are the two
+  tracers redundant (same underlying halo-mass field) or complementary
+  (independent fluctuations worth a joint analysis)? The
+  `Groups/.../groups_<snap>.hdf5` / `Subhalo`/`SubhaloMassType` layout it
+  assumes is unverified; the notebook's first cell checks what's actually
+  on disk before relying on it.
 - Robustness: does the `Omega_m` result hold across different `N_TARGET`,
   other snapshots/redshifts, and an Eddington-ratio (rather than luminosity)
   selection?

@@ -142,6 +142,63 @@ def test_run_suite_cv_uses_integer_ids_and_distinct_filename(fake_cv_snapshots, 
     assert set(loaded["sim_ids"]) == set(result["sim_ids"])
 
 
+def _fake_galaxy_catalog(n, seed, mass_range=(1e7, 1e12)):
+    rng = np.random.default_rng(seed)
+    return {
+        "pos": rng.uniform(0, 25.0, size=(n, 3)),
+        "stellar_mass": 10 ** rng.uniform(*np.log10(mass_range), size=n),
+        "flag": np.ones(n, dtype=bool),
+    }
+
+
+@pytest.fixture
+def fake_lh_galaxy_catalogs(monkeypatch):
+    paths = [f"/fake/Groups/LH/LH_{i}/groups_050.hdf5" for i in range(6)]
+
+    def fake_find_group_catalogs(groups_path, snap, prefix="LH_"):
+        return [p for p in paths if prefix in p]
+
+    def fake_read_galaxy_catalog(path):
+        sim_id = int(path.split("LH_")[1].split("/")[0])
+        return _fake_galaxy_catalog(n=200 + 20 * sim_id, seed=sim_id)
+
+    monkeypatch.setattr(pipeline, "find_group_catalogs", fake_find_group_catalogs)
+    monkeypatch.setattr(pipeline, "read_galaxy_catalog", fake_read_galaxy_catalog)
+    return paths
+
+
+def test_run_galaxy_suite_requires_n_target(fake_lh_galaxy_catalogs, tmp_path):
+    with pytest.raises(ValueError):
+        pipeline.run_galaxy_suite(output_dir=str(tmp_path), nproc=1)
+
+
+def test_run_galaxy_suite_uses_integer_ids_and_distinct_filename(fake_lh_galaxy_catalogs, tmp_path):
+    result = pipeline.run_galaxy_suite(
+        n_target=100, output_dir=str(tmp_path), nproc=1,
+    )
+
+    assert result["sim_ids"].dtype.kind in "iu"
+    assert list(result["sim_ids"]) == sorted(result["sim_ids"])
+    assert np.all(result["nbh"] == 100)
+
+    outfiles = list(tmp_path.glob("galaxy_knn_*_n100.npz"))
+    assert len(outfiles) == 1, list(tmp_path.iterdir())
+    assert not list(tmp_path.glob("agn_knn_*.npz"))
+
+    loaded = np.load(outfiles[0], allow_pickle=True)
+    assert set(loaded["sim_ids"]) == set(result["sim_ids"])
+
+
+def test_run_galaxy_suite_drops_sims_below_n_target(fake_lh_galaxy_catalogs, tmp_path):
+    # fake catalogs have 200 + 20*sim_id eligible-ish galaxies; sim_id=0
+    # has the fewest (~200), so a high n_target should drop it
+    result = pipeline.run_galaxy_suite(
+        n_target=205, output_dir=str(tmp_path), nproc=1,
+    )
+    assert 0 not in result["sim_ids"]
+    assert np.all(result["nbh"] == 205)
+
+
 def test_run_suite_drops_sims_below_n_target(fake_lh_snapshots, tmp_path):
     # fake catalogs have 100 + 10*sim_id eligible-ish BHs; sim_id=0 has the
     # fewest (~100), so a high n_target should drop it while keeping others

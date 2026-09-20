@@ -69,3 +69,55 @@ def read_bh_catalog(snapshot_path):
         bh_mdot = f["PartType5"]["BH_Mdot"][:].astype(np.float64)
 
     return {"pos": pos, "bh_mass": bh_mass, "bh_mdot": bh_mdot}
+
+
+def find_group_catalogs(groups_path, snap, prefix="LH_"):
+    """
+    Galaxy-tracer counterpart to `find_snapshots`: return the sorted list
+    of SubFind group-catalog file paths, one per simulation directory
+    under `groups_path` whose name starts with `prefix`, for a given
+    snapshot number. Mirrors `find_snapshots` exactly, just against
+    CAMELS's separate "Groups" data type rather than "Sims".
+    """
+    cat_name = f"groups_{snap:03d}.hdf5"
+    with os.scandir(groups_path) as top:
+        return sorted(
+            os.path.join(entry.path, cat_name)
+            for entry in top
+            if entry.is_dir(follow_symlinks=False) and entry.name.startswith(prefix)
+        )
+
+
+def read_galaxy_catalog(catalog_path):
+    """
+    Read the subhalo ("galaxy") catalog from one CAMELS group-catalog file.
+
+    Assumes the standard AREPO/SubFind `Subhalo` group layout:
+    `SubhaloPos` (comoving ckpc/h) and `SubhaloMassType`, whose 6 columns
+    are [gas, DM, -, -, stars, BH] -- column 4 is stellar mass. Not
+    independently verified against this account's actual data; a
+    malformed/unexpected file raises with the offending path and the
+    original exception rather than silently returning nonsense, and
+    notebook 06's discovery cell prints what's actually inside the first
+    file found before any of this is relied on downstream.
+
+    Returns
+    -------
+    dict with keys "pos" (N,3) in cMpc/h, "stellar_mass" (N,) in Msun,
+    "flag" (N,) bool (SubFind's not-spurious flag, all-True if the field
+    is absent), or None if the catalog has no subhalos.
+    """
+    with h5py.File(catalog_path, "r") as f:
+        if "Subhalo" not in f or f["Subhalo"]["SubhaloPos"].shape[0] == 0:
+            return None
+
+        h = f["Header"].attrs["HubbleParam"]
+
+        pos = f["Subhalo"]["SubhaloPos"][:].astype(np.float64) / 1e3
+        stellar_mass = f["Subhalo"]["SubhaloMassType"][:, 4].astype(np.float64) * 1e10 / h
+        if "SubhaloFlag" in f["Subhalo"]:
+            flag = f["Subhalo"]["SubhaloFlag"][:].astype(bool)
+        else:
+            flag = np.ones(len(pos), dtype=bool)
+
+    return {"pos": pos, "stellar_mass": stellar_mass, "flag": flag}

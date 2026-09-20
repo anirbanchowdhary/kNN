@@ -3,9 +3,11 @@ import numpy as np
 from src.selection import (
     bolometric_luminosity,
     count_eligible,
+    count_eligible_galaxies,
     select_brightest_n,
     select_luminous_agn,
     select_most_massive_n,
+    select_most_massive_galaxies_n,
 )
 
 
@@ -121,3 +123,73 @@ def test_mass_and_luminosity_selection_can_differ():
 
     assert by_mass.sum() == by_lum.sum() == 30
     assert not np.array_equal(by_mass, by_lum)
+
+
+def _galaxy_catalog(n=200, seed=0, n_spurious=0):
+    rng = np.random.default_rng(seed)
+    stellar_mass = 10 ** rng.uniform(7, 11, n)  # spans the 1e8 cut
+    flag = np.ones(n, dtype=bool)
+    if n_spurious:
+        flag[:n_spurious] = False
+    return stellar_mass, flag
+
+
+def test_select_most_massive_galaxies_n_returns_exactly_n():
+    stellar_mass, flag = _galaxy_catalog()
+    for n_target in (5, 20, 50):
+        mask = select_most_massive_galaxies_n(stellar_mass, flag, 1e8, n_target)
+        assert mask.sum() == n_target
+
+
+def test_select_most_massive_galaxies_n_picks_the_most_massive():
+    stellar_mass, flag = _galaxy_catalog()
+    mass_cut = 1e8
+    n_target = 20
+
+    mask = select_most_massive_galaxies_n(stellar_mass, flag, mass_cut, n_target)
+    eligible = flag & (stellar_mass > mass_cut)
+    rejected = eligible & ~mask
+
+    assert stellar_mass[mask].min() >= stellar_mass[rejected].max()
+    assert np.all(stellar_mass[mask] > mass_cut)
+
+
+def test_select_most_massive_galaxies_n_excludes_spurious_subhalos():
+    # The n_spurious most massive subhalos are flagged spurious; the
+    # selection must skip them even though they'd otherwise rank highest.
+    n = 200
+    rng = np.random.default_rng(1)
+    stellar_mass = 10 ** rng.uniform(7, 10, n)
+    flag = np.ones(n, dtype=bool)
+
+    top5 = np.argsort(stellar_mass)[::-1][:5]
+    flag[top5] = False  # the 5 most massive are spurious
+
+    mask = select_most_massive_galaxies_n(stellar_mass, flag, 1e7, 10)
+
+    assert mask.sum() == 10
+    assert not np.any(mask[top5])
+
+
+def test_select_most_massive_galaxies_n_drops_sim_when_too_few_eligible():
+    stellar_mass = np.array([1e9, 1e10, 1e11])
+    flag = np.ones(3, dtype=bool)
+    assert select_most_massive_galaxies_n(stellar_mass, flag, 1e8, 3).sum() == 3
+    assert select_most_massive_galaxies_n(stellar_mass, flag, 1e8, 4).sum() == 0
+
+
+def test_select_most_massive_galaxies_n_holds_density_constant_across_sims():
+    counts = []
+    for seed in range(6):
+        stellar_mass, flag = _galaxy_catalog(n=150 + 40 * seed, seed=seed)
+        counts.append(select_most_massive_galaxies_n(stellar_mass, flag, 1e8, 30).sum())
+    assert set(counts) == {30}
+
+
+def test_count_eligible_galaxies_matches_eligible_pool():
+    stellar_mass, flag = _galaxy_catalog(n_spurious=10)
+    mass_cut = 1e8
+
+    n_elig = count_eligible_galaxies(stellar_mass, flag, mass_cut)
+    expected = int((flag & (stellar_mass > mass_cut)).sum())
+    assert n_elig == expected
