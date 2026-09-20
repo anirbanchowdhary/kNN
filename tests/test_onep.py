@@ -81,6 +81,23 @@ def test_infer_1p_parameter_names_excludes_seed():
     assert mapping == {1: "Omega0", 2: "sigma8"}
 
 
+def test_infer_1p_parameter_names_ignores_non_numeric_columns():
+    # Regression: a real params file's raw label column (e.g. "#Name",
+    # values like "1P_p1_3") used to survive into theta_1p.columns and
+    # crash max()-min() with a str-minus-str TypeError. params.py now
+    # drops that column at load time, but this is the second line of
+    # defense: any other non-numeric column must be silently excluded,
+    # not crash the whole mapping.
+    params = ["Omega0", "sigma8"]
+    theta_1p = _synthetic_1p_theta(params)
+    theta_1p["raw_label"] = [f"1P_{lab}" for lab in theta_1p.index]
+
+    mapping, ambiguous = infer_1p_parameter_names(theta_1p)
+
+    assert ambiguous == {}
+    assert mapping == {1: "Omega0", 2: "sigma8"}
+
+
 def test_infer_1p_parameter_names_flags_ambiguous_group():
     params = ["Omega0", "sigma8"]
     theta_1p = _synthetic_1p_theta(params, steps=(-1, 1))

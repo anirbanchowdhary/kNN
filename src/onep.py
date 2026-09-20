@@ -29,6 +29,7 @@ which lists what's actually on disk before running anything.
 import re
 
 import numpy as np
+import pandas as pd
 
 # Only these correspond directly to LH's parameter names; used solely to
 # cross-check the 1P set's cosmological columns against the LH sanity
@@ -84,8 +85,16 @@ def infer_1p_parameter_names(theta_1p, tol=1e-8, exclude=("seed",)):
     ambiguous : dict {param_index: [varying_column_names]} for any group
                 that matched zero or more-than-one columns -- inspect these
                 by hand rather than trusting the inferred mapping
+
+    Non-numeric columns (e.g. a leftover text label) can never be a physics
+    parameter, so they're dropped from consideration up front rather than
+    raising deep inside a `max() - min()` -- `params.load_1p_params` already
+    drops the raw label column it derives `sim_id` from, but this is a
+    second line of defense for any other non-numeric column a release might
+    include.
     """
-    candidates = [c for c in theta_1p.columns if c not in exclude]
+    non_numeric = [c for c in theta_1p.columns if not pd.api.types.is_numeric_dtype(theta_1p[c])]
+    candidates = [c for c in theta_1p.columns if c not in exclude and c not in non_numeric]
 
     parsed = {label: parse_1p_label(label) for label in theta_1p.index}
     param_indices = sorted({p for p, _ in parsed.values() if p is not None})

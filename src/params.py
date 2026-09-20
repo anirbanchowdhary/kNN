@@ -21,6 +21,7 @@ def _load_params_table(params_file, prefix, cast):
 
     name_col = params.columns[0]
     params["sim_id"] = params[name_col].str.replace(prefix, "", regex=False).apply(cast)
+    params = params.drop(columns=[name_col])
 
     return params.set_index("sim_id").sort_index()
 
