@@ -183,6 +183,22 @@ tests/
   observed R²/RMSE doesn't clear that null distribution has a leakage or
   overfitting bug, not a real signal — never trust an emulator's numbers
   without checking this.
+- **Fold-level parallelism, not tree-level, inside the CV loop.**
+  `cross_val_predict_emulator` parallelizes across its `n_splits` K-folds
+  (`n_jobs=-1`, via sklearn's `cross_val_predict`), while `default_model`'s
+  `RandomForestRegressor` fits single-threaded (`n_jobs=1`) by default.
+  The other way round — what notebook 08's original code did (an
+  implicitly sequential fold loop, each fold's forest independently
+  claiming every core) — is a documented sklearn/joblib
+  nested-parallelism anti-pattern, and left the entire fold loop bounded
+  by a single fit's own internal parallelism ceiling regardless of how
+  many cores the machine actually has; that run (3 feature sets × 2
+  targets × 10 folds = 60 sequential 500-tree fits) never completed in a
+  tractable time on real data and had to be killed. The one exception is
+  `train_full_model`'s single one-off fit (`feature_importance`, notebook
+  08 section 6) — not inside a loop, so full per-fit parallelism
+  (`functools.partial(default_model, n_jobs=-1)`) is the right call
+  there.
 - **Selection-bias diagnostics are not optional for this selection.**
   Because the tracer is *luminosity*-selected (not mass-only), the number of
   AGN surviving the cut in a given simulation can itself correlate with a

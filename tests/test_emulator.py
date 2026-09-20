@@ -292,7 +292,33 @@ def test_default_model_has_documented_parameters():
     model = default_model(random_state=7)
     assert model.n_estimators == 500
     assert model.random_state == 7
-    assert model.n_jobs == -1
+    # n_jobs=1 by default -- cross_val_predict_emulator parallelizes
+    # across folds itself (n_jobs=-1 there by default) rather than each
+    # fold's forest grabbing every core; see both docstrings.
+    assert model.n_jobs == 1
+    # explicit override still works, for a genuine one-off fit outside
+    # any fold loop (train_full_model, via functools.partial)
+    assert default_model(random_state=7, n_jobs=-1).n_jobs == -1
+
+
+def test_cross_val_predict_emulator_n_jobs_does_not_change_results():
+    # n_jobs controls HOW folds are computed (sequential vs. parallel
+    # dispatch), never WHAT they compute: each fold's fit-and-predict is
+    # fully self-contained given a fixed KFold split and model_factory,
+    # so varying n_jobs must give bit-identical predictions. Uses
+    # _fast_model, which pins the MODEL's own n_jobs=1 regardless --
+    # varying the model's own n_jobs instead (rather than this
+    # function's) would introduce genuine, benign floating-point
+    # non-determinism (BLAS/thread summation order in split-finding)
+    # unrelated to what this test checks.
+    X, y, _ = _synthetic_case(n_sims=150)
+    pred_sequential = cross_val_predict_emulator(
+        X, y, model_factory=_fast_model, n_splits=5, random_state=7, n_jobs=1,
+    )
+    pred_parallel = cross_val_predict_emulator(
+        X, y, model_factory=_fast_model, n_splits=5, random_state=7, n_jobs=-1,
+    )
+    assert np.array_equal(pred_sequential, pred_parallel)
 
 
 # ---------------------------------------------------------------------

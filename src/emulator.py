@@ -40,6 +40,25 @@ dominate split choices and badly degrade a lower-variance one (verified
 directly in `tests/test_emulator.py`). Independent per-target fits, all
 sharing the same K-fold split, sidestep this at negligible extra cost.
 
+Parallelism is deliberately split across two knobs, never both maxed at
+once: `default_model`'s `RandomForestRegressor` defaults to `n_jobs=1`
+(single-threaded per fit), while `cross_val_predict_emulator` (and
+`null_control_metrics`, which calls it repeatedly) default to `n_jobs=-1`
+themselves, parallelizing across K-fold *folds* rather than each fold's
+trees. The other way round -- what this module originally shipped with,
+and what notebook 08's first real run tried -- nests an implicitly
+sequential fold loop inside a per-fit `n_jobs=-1`: correct on a small
+machine where a single fit's own internal parallelism already saturates
+every core, but on any machine with more cores than one fit can
+profitably use internally (the realistic case for this project's actual
+hardware), the fold loop burns only that one fit's ceiling while leaving
+the rest of the machine idle for the whole run -- and it is, independent
+of that, the documented sklearn/joblib nested-parallelism anti-pattern.
+The one exception is `train_full_model`'s single one-off fit
+(`feature_importance`, notebook 08 section 6) -- not inside a loop, so
+full per-fit parallelism (`functools.partial(default_model, n_jobs=-1)`)
+is safe and the right choice there.
+
 The single most important check this module supports is
 `null_control_metrics`: an emulator that looks predictive on shuffled
 targets is a leakage or overfitting bug, not a good model -- the same
@@ -59,9 +78,28 @@ from sklearn.model_selection import KFold, cross_val_predict
 from .complementarity import align_common_sims
 
 
-def default_model(random_state=42, n_estimators=500):
-    """The default regressor: a random forest (see module docstring for why)."""
-    return RandomForestRegressor(n_estimators=n_estimators, random_state=random_state, n_jobs=-1)
+def default_model(random_state=42, n_estimators=500, n_jobs=1):
+    """
+    The default regressor: a random forest (see module docstring for why).
+
+    `n_jobs=1` by default -- deliberately NOT `-1`. This factory is
+    called once per K-fold *fold* inside `cross_val_predict_emulator`,
+    and that function parallelizes across folds itself (its own
+    `n_jobs`, default `-1`, passed straight through to
+    `cross_val_predict`). If each individual fold's forest also grabbed
+    every core, the two parallelism layers would nest -- the standard
+    sklearn/joblib oversubscription anti-pattern (see module docstring).
+
+    CHANGED: this default was `n_jobs=-1` before this project's first
+    real notebook run made the cost of that visible (60 sequential
+    500-tree fits, one per fold x target x feature-set, never completed
+    in a tractable time). Anything constructing `default_model()`
+    directly and expecting per-fit multithreading now needs
+    `n_jobs=-1` explicit -- e.g. via `functools.partial(default_model,
+    n_jobs=-1)` for a genuine one-off fit outside any fold loop
+    (`train_full_model`).
+    """
+    return RandomForestRegressor(n_estimators=n_estimators, random_state=random_state, n_jobs=n_jobs)
 
 
 def combined_features(sim_ids_agn, residuals_agn, sim_ids_gal, residuals_gal):
@@ -88,7 +126,8 @@ def combined_features(sim_ids_agn, residuals_agn, sim_ids_gal, residuals_gal):
     return common, np.hstack([aligned_agn, aligned_gal])
 
 
-def cross_val_predict_emulator(X, y, model_factory=default_model, n_splits=10, random_state=42):
+def cross_val_predict_emulator(X, y, model_factory=default_model, n_splits=10,
+                                random_state=42, n_jobs=-1):
     """
     K-fold out-of-fold predictions: every row of `X`/`y` is predicted by
     a model that never saw it during training. Preferred over a single
@@ -113,11 +152,27 @@ def cross_val_predict_emulator(X, y, model_factory=default_model, n_splits=10, r
     this entirely, at negligible extra cost for the handful of targets
     this project ever predicts.
 
+    `n_jobs` parallelizes across the `n_splits` folds (passed straight
+    through to `cross_val_predict`), NOT across each fold's trees --
+    `model_factory`'s default (`default_model`) builds its
+    `RandomForestRegressor` with `n_jobs=1` for exactly this reason (see
+    module docstring). Fold-level parallelism is the more robust place
+    for it regardless of core count: the `n_splits` folds are fully
+    independent, equal-cost units of work, so this scales with however
+    many cores are available, whereas a single fit's own internal
+    tree-parallelism has a lower ceiling that a large core count can
+    outrun -- a purely sequential fold loop (as this module originally
+    had) leaves any cores beyond that ceiling idle for the entire run.
+
     Parameters
     ----------
     X : (n_sims, n_features)
     y : (n_sims,) or (n_sims, n_targets)
     model_factory : callable(random_state) -> unfitted sklearn-API regressor
+    n_jobs : int, default -1
+        Passed to `cross_val_predict` -- parallelizes across the
+        `n_splits` folds (one `cross_val_predict` call per target
+        column). Set to `1` to force fully sequential fold fitting.
 
     Returns
     -------
@@ -135,7 +190,7 @@ def cross_val_predict_emulator(X, y, model_factory=default_model, n_splits=10, r
 
     cv = KFold(n_splits=n_splits, shuffle=True, random_state=random_state)
     preds = np.column_stack([
-        cross_val_predict(model_factory(random_state=random_state), X, y_2d[:, j], cv=cv)
+        cross_val_predict(model_factory(random_state=random_state), X, y_2d[:, j], cv=cv, n_jobs=n_jobs)
         for j in range(y_2d.shape[1])
     ])
     return preds[:, 0] if is_1d else preds
@@ -204,7 +259,7 @@ def prediction_metrics(y_true, y_pred, target_names):
 
 
 def null_control_metrics(X, y, target_names, model_factory=default_model,
-                          n_shuffles=100, n_splits=10, random_state=42):
+                          n_shuffles=100, n_splits=10, random_state=42, n_jobs=-1):
     """
     A permutation-null distribution of `prediction_metrics`: shuffle `y`'s
     *rows* (breaks the X<->y correspondence while keeping each column's
@@ -219,6 +274,13 @@ def null_control_metrics(X, y, target_names, model_factory=default_model,
     "signal" is a pipeline artifact -- leakage, an overfit model, or
     chance -- not real predictive power.
 
+    `n_jobs` is forwarded to every inner `cross_val_predict_emulator`
+    call (see its docstring for the fold-vs-tree parallelism rationale)
+    -- it matters more here than there: this function calls it
+    `n_shuffles` times, so the fully-sequential-fold-loop version of the
+    cost `cross_val_predict_emulator`'s docstring describes is multiplied
+    by `n_shuffles` again.
+
     Returns
     -------
     tidy DataFrame with columns (target, r2, rmse, shuffle)
@@ -232,7 +294,8 @@ def null_control_metrics(X, y, target_names, model_factory=default_model,
         perm = rng.permutation(len(y))
         y_shuffled = y[perm]
         y_pred = cross_val_predict_emulator(
-            X, y_shuffled, model_factory=model_factory, n_splits=n_splits, random_state=random_state
+            X, y_shuffled, model_factory=model_factory, n_splits=n_splits,
+            random_state=random_state, n_jobs=n_jobs,
         )
         metrics = prediction_metrics(y_shuffled, y_pred, target_names)
         metrics["shuffle"] = i
