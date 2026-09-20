@@ -45,15 +45,19 @@ Parameters/IllustrisTNG/L25n256/LH/CosmoAstroSeed_IllustrisTNG_L25n256_LH.txt
 - The parameter table (`CosmoAstroSeed_<suite>_<generation>_<set>.txt`) is
   whitespace-delimited; its first column is `LH_<id>` and the other columns
   are the 6 parameters above plus the random seed.
-- **Galaxies** (notebook 06) come from a separate CAMELS data product:
-  SubFind group/subhalo catalogs, assumed at
-  `Groups/<suite>/<generation>/<set>/<realization>/groups_<snap:03d>.hdf5`
-  (`GROUPS_PATH` in `src/config.py`), with a `Subhalo` HDF5 group holding
-  `SubhaloPos` and `SubhaloMassType` (6 columns, index 4 = stellar mass).
-  This layout is **not independently verified** against this account's
-  data — notebook 06's first cell opens whatever it finds and prints the
-  actual keys before anything downstream relies on it, the same discipline
-  used for the 1P and CV sets.
+- **Galaxies** (notebook 06) come from SubFind group/subhalo catalogs:
+  `groups_<snap:03d>.hdf5` inside the same per-realization directory as
+  the particle snapshot (`GROUPS_PATH = SIM_PATH` in `src/config.py`) —
+  **confirmed** against real data (notebook 06's discovery cell); CAMELS's
+  general docs describe "Groups" as a logically separate data type, but
+  for this account it isn't a separate path. The `Subhalo` HDF5 group
+  holds `SubhaloPos` and `SubhaloMassType` (6 columns, index 4 = stellar
+  mass), also confirmed; `SubhaloFlag` is **absent** in this dataset, so
+  `read_galaxy_catalog` falls back to treating every subhalo as
+  non-spurious. `SubhaloPos` can land marginally outside `[0, BOXSIZE)`
+  for a subhalo straddling the periodic boundary (2/1000 real LH sims hit
+  this on the first run, rejected outright by `scipy`'s boxsize-aware
+  `cKDTree`) — `data_io.wrap_periodic` corrects for it.
 
 ## Layout
 
@@ -215,6 +219,26 @@ pytest tests/
   by CV signal-to-noise, `n_s` (spectral index) comes out highest (1.44x,
   mildly surprising), `Omega0` second (0.91x) — nothing else decisively
   clears the noise.
+- **Galaxy tracer** (notebook 06, real-data run, 1000/1000 LH simulations
+  have group catalogs): fixed-N galaxies (`N_TARGET_GAL=262`, 5th
+  percentile) show `Omega_m` significant (R=0.0234, q≈0) as expected, but
+  also **`sigma_8` significant (R=0.0049, q=0.0015)** — a parameter that
+  is *not* significant for AGN at the matched fixed-N selection
+  (R=0.0019, q=0.62). This is the first real evidence of a second
+  significant parameter anywhere in this project, and it shows up
+  specifically in the tracer comparison, not the LH set alone. The direct
+  cross-tracer check (`bin_correlation`, section 6) finds galaxy and AGN
+  clustering fluctuations are correlated but not redundant — median
+  |correlation| = 0.69, max = 0.92 across the LH suite's common
+  simulations — consistent with both substantially tracing the same
+  large-scale structure while still each carrying information the other
+  doesn't (galaxies' `sigma_8` sensitivity being the clearest example).
+  Two real simulations (`LH_15`, `LH_263`) initially failed with a scipy
+  periodic-box error from `SubhaloPos` landing marginally outside
+  `[0, BOXSIZE)`; fixed by wrapping positions in `read_galaxy_catalog`
+  (`data_io.wrap_periodic`) — not yet re-run to confirm both are
+  recovered, but the effect on the results above is expected to be
+  negligible (2/1000 sims).
 
 ## Roadmap (not built yet)
 
@@ -222,19 +246,17 @@ pytest tests/
   the identical N doesn't (notebook 03's biggest open question)? Worth
   checking whether it's specific to `A_SN1` or shows up for other feedback
   parameters at different N/snapshots before reading much into it.
-- **Degeneracy**: whether two parameters (e.g. `Omega_m` and `A_AGN1`) leave
-  similar-looking imprints the kNN-CDF alone can't tell apart. Lower priority
-  until a second parameter shows a real signal (currently only `Omega_m`
-  does) — a Fisher/covariance analysis has nothing to act on with one axis.
-- **Galaxy tracer** (notebook 06, built but not yet run against real data):
-  SubFind subhalos, fixed-N by stellar mass, compared against AGN both by
-  per-parameter sensitivity and by a direct cross-tracer per-bin
-  correlation across the LH suite (`src/complementarity.py`) — are the two
-  tracers redundant (same underlying halo-mass field) or complementary
-  (independent fluctuations worth a joint analysis)? The
-  `Groups/.../groups_<snap>.hdf5` / `Subhalo`/`SubhaloMassType` layout it
-  assumes is unverified; the notebook's first cell checks what's actually
-  on disk before relying on it.
+- **Degeneracy**: whether two parameters (e.g. `Omega_m` and `sigma_8`)
+  leave similar-looking imprints the kNN-CDF alone can't tell apart. Was
+  lower priority until a second parameter showed a real signal — the
+  galaxy tracer's `sigma_8` significance (notebook 06) is that second
+  signal, so a Fisher/covariance analysis (using the galaxy sensitivity
+  table, or a joint AGN+galaxy one) now has something to act on.
+- **Re-run notebook 06's galaxy generation** after the `wrap_periodic` fix
+  to confirm `LH_15`/`LH_263` are recovered (expected to bring galaxy
+  retention from 948/1000 to ~950/1000, matching AGN's retention at its
+  own `N_TARGET`) — a real-data confirmation still owed, not just the
+  synthetic dry-run's word for it.
 - Robustness: does the `Omega_m` result hold across different `N_TARGET`,
   other snapshots/redshifts, and an Eddington-ratio (rather than luminosity)
   selection?

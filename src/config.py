@@ -116,13 +116,15 @@ PARAMS_FILE_CV = (
 # ----------------------------------------------------------------------
 # Galaxy (subhalo) selection, for a tracer comparison against AGN
 # ----------------------------------------------------------------------
-# "Galaxies" here means SubFind subhalos, a separate CAMELS data product
-# (Type "Groups", one group-catalog file per realization, same directory
-# naming as Sims) from the particle snapshots AGN are read from -- not the
-# same file, and not independently verified against this account's actual
-# data yet, so notebook 06 discovers what's on disk (find_group_catalogs)
-# before relying on GROUPS_PATH or the SubhaloMassType layout assumed by
-# read_galaxy_catalog.
+# "Galaxies" here means SubFind subhalos. Confirmed against real data
+# (notebook 06's discovery cell): for this account, group-catalog files
+# (`groups_<snap:03d>.hdf5`, holding a `Subhalo` group with `SubhaloPos`
+# and `SubhaloMassType`) sit in the *same* per-realization directory as
+# the particle snapshots -- there is no separate CAMELS "Groups" data
+# type here, unlike what CAMELS's general docs describe -- so GROUPS_PATH
+# is just SIM_PATH. `SubhaloFlag` was also confirmed absent from this
+# dataset's Subhalo group; read_galaxy_catalog's all-True fallback for
+# that case is exercised, not just theoretical.
 
 GALAXY_MASS_CUT = 1e8      # Msun, base stellar-mass floor before fixed-N ranking
 MIN_GALAXIES = 5             # minimum retained galaxies for a sim to be usable

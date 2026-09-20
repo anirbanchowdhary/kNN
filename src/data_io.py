@@ -14,6 +14,8 @@ import h5py
 import hdf5plugin  # noqa: F401  (registers the compression filters used by CAMELS)
 import numpy as np
 
+from .config import BOXSIZE
+
 
 def find_snapshots(sim_path, snap, prefix="LH_"):
     """
@@ -76,8 +78,12 @@ def find_group_catalogs(groups_path, snap, prefix="LH_"):
     Galaxy-tracer counterpart to `find_snapshots`: return the sorted list
     of SubFind group-catalog file paths, one per simulation directory
     under `groups_path` whose name starts with `prefix`, for a given
-    snapshot number. Mirrors `find_snapshots` exactly, just against
-    CAMELS's separate "Groups" data type rather than "Sims".
+    snapshot number. Mirrors `find_snapshots` exactly -- for this
+    account's data, `groups_path` is the same directory tree as
+    `sim_path` (group catalogs sit alongside snapshots, confirmed by
+    notebook 06's discovery cell), but the function takes its own path
+    since CAMELS documents this as a logically separate data type and
+    other accounts' data may actually be laid out that way.
     """
     cat_name = f"groups_{snap:03d}.hdf5"
     with os.scandir(groups_path) as top:
@@ -86,6 +92,23 @@ def find_group_catalogs(groups_path, snap, prefix="LH_"):
             for entry in top
             if entry.is_dir(follow_symlinks=False) and entry.name.startswith(prefix)
         )
+
+
+def wrap_periodic(pos, boxsize=BOXSIZE):
+    """
+    Wrap positions into [0, boxsize).
+
+    `SubhaloPos` (a periodic-aware center-of-mass) can land marginally
+    outside that half-open interval -- exactly at `boxsize`, or a hair
+    negative -- for a subhalo whose particles straddle the box edge.
+    `scipy.spatial.cKDTree`'s `boxsize=` mode rejects that outright
+    ("Some/Negative input data are ... outside of the periodic box"),
+    which silently dropped 2/1000 real LH simulations from the first
+    galaxy-tracer run before this wrap was added. BH `Coordinates` have
+    not shown the same issue in any real run so far, so this is applied
+    only where it's actually needed.
+    """
+    return np.mod(pos, boxsize)
 
 
 def read_galaxy_catalog(catalog_path):
@@ -113,7 +136,7 @@ def read_galaxy_catalog(catalog_path):
 
         h = f["Header"].attrs["HubbleParam"]
 
-        pos = f["Subhalo"]["SubhaloPos"][:].astype(np.float64) / 1e3
+        pos = wrap_periodic(f["Subhalo"]["SubhaloPos"][:].astype(np.float64) / 1e3)
         stellar_mass = f["Subhalo"]["SubhaloMassType"][:, 4].astype(np.float64) * 1e10 / h
         if "SubhaloFlag" in f["Subhalo"]:
             flag = f["Subhalo"]["SubhaloFlag"][:].astype(bool)
