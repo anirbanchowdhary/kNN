@@ -1,0 +1,261 @@
+"""
+Point prediction: given a measured kNN-CDF residual vector, what are the
+predicted values of (Omega_m, sigma_8)?
+
+This is a genuinely different question from `fisher.py`'s Fisher-matrix
+forecast. Fisher answers "how tightly *could* this statistic constrain
+the parameters" (an achievable-precision bound, from a local-linear
+response and a diagonal noise covariance); this module answers "given
+one actual measured summary, what values does that predict" -- a point
+predictor, trained on the LH suite's (summary, theta) pairs, evaluated on
+genuinely held-out data. Its held-out RMSE is an empirical scatter, not a
+rigorous bound, and it is not a calibrated posterior: it returns a point
+estimate per parameter, not a distribution.
+
+Inputs are the kNN-CDF residual vector only (the same (n_sims, n_k*n_r)
+arrays every other module here uses). The 4 astrophysics parameters
+(A_SN1, A_AGN1, A_SN2, A_AGN2) are neither inputs nor targets -- the
+model implicitly marginalizes over their variation across the LH suite's
+Latin-hypercube design, the same "control for everything else" logic
+`fisher.linear_response` makes explicit via OLS regression. This is only
+valid for LH's own astrophysics-parameter distribution; a summary from
+outside that prior range has no such guarantee.
+
+Every function takes `model_factory` (default: `default_model`, a
+`RandomForestRegressor`) rather than hardcoding an estimator, so a
+different scikit-learn-API regressor drops in without touching the
+cross-validation code. Random forests are the default here rather than a
+Gaussian process because they need no kernel/length-scale tuning at
+~150-300 input bins and n~950-1000 samples, where a default-kernel GP is
+not competitive without feature reduction first, and they never split on
+a constant feature, so the pinned-CDF-bin problem `fisher.py` needed
+`drop_uninformative_bins` for (33/150 AGN bins, 23/150 galaxy bins were
+exactly zero-variance in the real CV run) is a non-issue here "for free".
+
+`cross_val_predict_emulator` fits one model *per target independently*,
+not a single joint multi-output model, even though `RandomForestRegressor`
+supports multi-output natively -- a joint fit's splitting criterion is
+evaluated jointly across targets, so a much-higher-variance target can
+dominate split choices and badly degrade a lower-variance one (verified
+directly in `tests/test_emulator.py`). Independent per-target fits, all
+sharing the same K-fold split, sidestep this at negligible extra cost.
+
+The single most important check this module supports is
+`null_control_metrics`: an emulator that looks predictive on shuffled
+targets is a leakage or overfitting bug, not a good model -- the same
+permutation-null discipline `sensitivity.py`/`onep.py` apply everywhere
+else in this project. Never trust `prediction_metrics` computed from
+anything but `cross_val_predict_emulator`'s held-out predictions --
+`train_full_model`'s model has seen every LH simulation and its own
+predictions on that same data say nothing about generalization.
+"""
+
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import r2_score, mean_squared_error
+from sklearn.model_selection import KFold, cross_val_predict
+
+from .complementarity import align_common_sims
+
+
+def default_model(random_state=42, n_estimators=500):
+    """The default regressor: a random forest (see module docstring for why)."""
+    return RandomForestRegressor(n_estimators=n_estimators, random_state=random_state, n_jobs=-1)
+
+
+def combined_features(sim_ids_agn, residuals_agn, sim_ids_gal, residuals_gal):
+    """
+    AGN+galaxy residuals, restricted to the simulations common to both
+    fixed-N runs (they can retain different simulations), concatenated
+    bin-wise into one feature matrix -- AGN's columns first, then
+    galaxy's. A thin wrapper around `complementarity.align_common_sims`;
+    never reimplement that intersection/reorder logic.
+
+    Unlike `fisher.combine_fisher` (which sums two tracers' Fisher
+    matrices and is only valid if they're independent -- real data
+    already showed they aren't, median cross-tracer correlation 0.69),
+    concatenating features lets a tree-based model learn cross-tracer
+    structure directly. It does not inherit that independence assumption.
+
+    Returns
+    -------
+    (common_sim_ids, X_combined)
+    """
+    common, aligned_agn, aligned_gal = align_common_sims(
+        sim_ids_agn, residuals_agn, sim_ids_gal, residuals_gal
+    )
+    return common, np.hstack([aligned_agn, aligned_gal])
+
+
+def cross_val_predict_emulator(X, y, model_factory=default_model, n_splits=10, random_state=42):
+    """
+    K-fold out-of-fold predictions: every row of `X`/`y` is predicted by
+    a model that never saw it during training. Preferred over a single
+    train/test split at this project's sample size (~950-1000 LH sims) --
+    a single 80/20 split holds out only ~190-200 rows and its score is
+    sensitive to which rows land in the test set; K-fold OOF uses the
+    whole suite for both training and evaluation while still giving every
+    row an honest held-out prediction.
+
+    Uses an explicit `KFold(shuffle=True, random_state=...)`, never the
+    bare integer `cv=n_splits` shortcut, which does not shuffle by
+    default and would correlate folds with `sim_id` order.
+
+    For a multi-target `y`, fits one model *per target independently*
+    (looping over columns), all sharing the same K-fold split -- not a
+    single joint multi-output model. sklearn's multi-output splitting
+    criterion is evaluated jointly across targets, so a much-higher-
+    variance target can dominate split choices and badly degrade a
+    lower-variance one (verified in `tests/test_emulator.py`: a 1000x
+    target-scale mismatch drops the low-variance target's R^2 from ~0.99
+    to negative under a joint fit). Independent per-target fits sidestep
+    this entirely, at negligible extra cost for the handful of targets
+    this project ever predicts.
+
+    Parameters
+    ----------
+    X : (n_sims, n_features)
+    y : (n_sims,) or (n_sims, n_targets)
+    model_factory : callable(random_state) -> unfitted sklearn-API regressor
+
+    Returns
+    -------
+    (n_sims,) or (n_sims, n_targets) ndarray, same shape and row order as `y`
+    """
+    X = np.asarray(X)
+    y = np.asarray(y)
+    if len(X) != len(y):
+        raise ValueError(f"X has {len(X)} rows but y has {len(y)} -- not aligned")
+    if n_splits > len(X):
+        raise ValueError(f"n_splits={n_splits} exceeds the number of rows ({len(X)})")
+
+    is_1d = y.ndim == 1
+    y_2d = y.reshape(-1, 1) if is_1d else y
+
+    cv = KFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+    preds = np.column_stack([
+        cross_val_predict(model_factory(random_state=random_state), X, y_2d[:, j], cv=cv)
+        for j in range(y_2d.shape[1])
+    ])
+    return preds[:, 0] if is_1d else preds
+
+
+def train_full_model(X, y, model_factory=default_model, random_state=42):
+    """
+    Fit one model on ALL of `X`/`y`. For downstream use only
+    (`feature_importance`, or predicting on a genuinely separate,
+    never-trained-on set) -- never for a performance metric. This model
+    has seen every row, so its own predictions on `X` say nothing about
+    generalization; use `cross_val_predict_emulator` for that.
+
+    Unlike `cross_val_predict_emulator`, this fits ONE joint multi-output
+    model when `y` has multiple columns (not independent per-target
+    models) -- acceptable here since this function is explicitly not
+    used to measure predictive accuracy, only to inspect
+    `feature_importance`, and this project's two targets (Omega_m,
+    sigma_8) have comparable prior scales, so the multi-output
+    splitting-criterion pitfall `cross_val_predict_emulator`'s docstring
+    describes is not expected to bias the importances meaningfully.
+    """
+    X = np.asarray(X)
+    y = np.asarray(y)
+    if len(X) != len(y):
+        raise ValueError(f"X has {len(X)} rows but y has {len(y)} -- not aligned")
+
+    model = model_factory(random_state=random_state)
+    model.fit(X, y)
+    return model
+
+
+def prediction_metrics(y_true, y_pred, target_names):
+    """
+    Per-target R^2 and RMSE, as a tidy DataFrame (columns: target, r2, rmse).
+
+    Raises ValueError on a shape mismatch, or if any `y_true` column has
+    zero variance (R^2 is undefined there -- never silently return a
+    number that looks meaningful but isn't, the same discipline
+    `fisher.marginalized_covariance` applies to a singular Fisher matrix).
+    """
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    if y_true.ndim == 1:
+        y_true = y_true.reshape(-1, 1)
+    if y_pred.ndim == 1:
+        y_pred = y_pred.reshape(-1, 1)
+
+    if y_true.shape != y_pred.shape:
+        raise ValueError(f"y_true shape {y_true.shape} != y_pred shape {y_pred.shape}")
+    if y_true.shape[1] != len(target_names):
+        raise ValueError(
+            f"y_true has {y_true.shape[1]} columns but {len(target_names)} target_names given"
+        )
+
+    rows = []
+    for j, name in enumerate(target_names):
+        if np.var(y_true[:, j]) == 0:
+            raise ValueError(f"y_true column '{name}' has zero variance -- R^2 is undefined")
+        rows.append({
+            "target": name,
+            "r2": r2_score(y_true[:, j], y_pred[:, j]),
+            "rmse": np.sqrt(mean_squared_error(y_true[:, j], y_pred[:, j])),
+        })
+    return pd.DataFrame(rows)
+
+
+def null_control_metrics(X, y, target_names, model_factory=default_model,
+                          n_shuffles=100, n_splits=10, random_state=42):
+    """
+    A permutation-null distribution of `prediction_metrics`: shuffle `y`'s
+    *rows* (breaks the X<->y correspondence while keeping each column's
+    own marginal distribution -- the same convention `sensitivity.null_scale`
+    uses, shuffling parameter labels while keeping residuals fixed), rerun
+    the identical `cross_val_predict_emulator` + `prediction_metrics`
+    pipeline `n_shuffles` times.
+
+    This is the central check of this module: a real emulator's observed
+    R^2 must sit far above this null distribution's 95th percentile (and
+    observed RMSE far below its 5th percentile), or the apparent
+    "signal" is a pipeline artifact -- leakage, an overfit model, or
+    chance -- not real predictive power.
+
+    Returns
+    -------
+    tidy DataFrame with columns (target, r2, rmse, shuffle)
+    """
+    X = np.asarray(X)
+    y = np.asarray(y)
+    rng = np.random.default_rng(random_state)
+
+    frames = []
+    for i in range(n_shuffles):
+        perm = rng.permutation(len(y))
+        y_shuffled = y[perm]
+        y_pred = cross_val_predict_emulator(
+            X, y_shuffled, model_factory=model_factory, n_splits=n_splits, random_state=random_state
+        )
+        metrics = prediction_metrics(y_shuffled, y_pred, target_names)
+        metrics["shuffle"] = i
+        frames.append(metrics)
+
+    return pd.concat(frames, ignore_index=True)
+
+
+def feature_importance(model, n_k, n_r):
+    """
+    `model.feature_importances_` reshaped to (n_k, n_r) -- directly
+    comparable, bin for bin, to `sensitivity.scale_resolved_response`'s
+    layout. Raises if `model` has no `feature_importances_` (i.e. isn't a
+    tree-based model).
+    """
+    if not hasattr(model, "feature_importances_"):
+        raise ValueError(
+            f"{type(model).__name__} has no feature_importances_ "
+            f"(not a tree-based model) -- feature_importance only applies to those"
+        )
+    importances = model.feature_importances_
+    if importances.shape[0] != n_k * n_r:
+        raise ValueError(
+            f"model has {importances.shape[0]} features, expected n_k*n_r={n_k * n_r}"
+        )
+    return importances.reshape(n_k, n_r)

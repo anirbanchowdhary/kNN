@@ -91,6 +91,11 @@ src/
   fisher.py                       Fisher-matrix precision forecast: LH-regression
                                    response + CV-noise covariance -> marginalized
                                    (Omega_m, sigma_8) constraint, per tracer and combined
+  emulator.py                     point prediction of (Omega_m, sigma_8) from a
+                                   measured kNN-CDF: swappable-model (default
+                                   RandomForestRegressor) K-fold out-of-fold
+                                   evaluation, AGN/galaxy/combined feature sets,
+                                   shuffled-label null control
   plotting.py                     figures: scale response, sensitivity bar
                                    (with null floor), 1P sweep, cross-tracer correlation,
                                    Fisher confidence ellipses
@@ -109,6 +114,13 @@ notebooks/
   07_fisher_forecast.ipynb                      Fisher forecast: how tightly could
                                                  (Omega_m, sigma_8) be constrained,
                                                  per tracer and (naively) combined
+  08_emulator.ipynb                              point-prediction emulator: AGN/
+                                                  galaxy/combined RF regressors for
+                                                  (Omega_m, sigma_8), K-fold held-out
+                                                  evaluation, shuffled-label null
+                                                  check on real data, RMSE cross-
+                                                  checked against notebook 07's
+                                                  Fisher sigmas
 tests/
   synthetic-data / fake-I/O unit tests for every module above (no simulation
   data required to run these) — including pipeline.run_suite()/run_galaxy_suite()
@@ -156,6 +168,21 @@ tests/
   (Benjamini–Hochberg FDR across the 6 parameters — with 6 tests there's a
   ~26% chance of a spurious p < 0.05) or compare `R_obs` to `null_floor`.
   `plot_sensitivity_bar` draws that floor and fades non-significant bars.
+- **A predictor is not a precision forecast, and neither is trustworthy
+  without its own null check.** `emulator.py`'s point predictor
+  (`cross_val_predict_emulator`) answers a different question than
+  `fisher.py`'s Fisher forecast: given a *measured* kNN-CDF, what values
+  does it predict, vs. how tightly *could* the statistic constrain the
+  parameters in principle. Held-out evaluation is K-fold out-of-fold
+  (`cross_val_predict_emulator`), not a single train/test split, since
+  every LH simulation gets an honest held-out prediction that way rather
+  than one split's luck deciding the score. And the same permutation-null
+  discipline the rest of this project applies to significance applies
+  here to predictive power: `null_control_metrics` reruns the identical
+  pipeline with the parameter labels shuffled, and an emulator whose
+  observed R²/RMSE doesn't clear that null distribution has a leakage or
+  overfitting bug, not a real signal — never trust an emulator's numbers
+  without checking this.
 - **Selection-bias diagnostics are not optional for this selection.**
   Because the tracer is *luminosity*-selected (not mass-only), the number of
   AGN surviving the cut in a given simulation can itself correlate with a
@@ -292,11 +319,22 @@ pytest tests/
   cross-covariance (running both tracers over the *same* CV realizations
   and measuring their joint scatter), not just each tracer's own CV run —
   the naive independent-sum in notebook 07 is only an upper bound.
-- **Point-prediction of `Omega_m`/`sigma_8`** from a measured kNN-CDF: a
-  regression/emulator (e.g. random forest or Gaussian process) trained on
-  the LH suite's `(summary, theta)` pairs, validated on a held-out split —
-  a different tool from the Fisher forecast above, which only says how
-  precise such a predictor *could* be, not what it would actually predict.
+- **Run notebook 08 against real data.** The point-prediction emulator
+  (`src/emulator.py` + `notebooks/08_emulator.ipynb`) is now built and
+  synthetic-dry-run validated — a random-forest regressor, K-fold
+  out-of-fold evaluated, for AGN-only/galaxy-only/combined feature sets,
+  gated by a required shuffled-label null check and cross-checked against
+  notebook 07's real Fisher sigmas — but every real-data number in it is
+  still unverified; no Findings claim should be written until it's run
+  and reported back.
+- **Does the empirical combined-tracer emulator's advantage hold up on
+  real data?** Notebook 07's naive Fisher combination is only an
+  optimistic upper bound (AGN/galaxy aren't independent, r≈0.69), but the
+  emulator's combined feature set isn't subject to that same assumption —
+  concatenated features let a tree learn cross-tracer structure directly.
+  Whether that theoretical advantage actually shows up as better held-out
+  `sigma_8` prediction on real data is an open, testable question once
+  notebook 08 runs.
 - Robustness: does the `Omega_m` result hold across different `N_TARGET`,
   other snapshots/redshifts, and an Eddington-ratio (rather than luminosity)
   selection?
