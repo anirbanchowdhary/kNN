@@ -54,6 +54,24 @@ def fake_1p_snapshots(monkeypatch):
     return paths, labels
 
 
+@pytest.fixture
+def fake_cv_snapshots(monkeypatch):
+    # CV uses the same simple integer-id convention as LH (CV_<n>), just a
+    # different Set name -- no special label parsing needed, unlike 1P.
+    paths = [f"/fake/CV/CV_{i}/snapshot_050.hdf5" for i in range(27)]
+
+    def fake_find_snapshots(sim_path, snap, prefix="LH_"):
+        return [p for p in paths if prefix in p]
+
+    def fake_read_bh_catalog(path):
+        sim_id = int(path.split("CV_")[1].split("/")[0])
+        return _fake_catalog(n=200, seed=1000 + sim_id)  # same fiducial "recipe", different seed
+
+    monkeypatch.setattr(pipeline, "find_snapshots", fake_find_snapshots)
+    monkeypatch.setattr(pipeline, "read_bh_catalog", fake_read_bh_catalog)
+    return paths
+
+
 def test_run_suite_lh_default_is_backward_compatible(fake_lh_snapshots, tmp_path):
     result = pipeline.run_suite(
         n_target=50, sim_path="unused", output_dir=str(tmp_path), nproc=1,
@@ -101,6 +119,25 @@ def test_run_suite_1p_produces_string_sim_ids_and_distinct_filename(fake_1p_snap
     assert len(outfiles) == 1, list(tmp_path.iterdir())
 
     # round-trips through np.savez/np.load without corrupting the string labels
+    loaded = np.load(outfiles[0], allow_pickle=True)
+    assert set(loaded["sim_ids"]) == set(result["sim_ids"])
+
+
+def test_run_suite_cv_uses_integer_ids_and_distinct_filename(fake_cv_snapshots, tmp_path):
+    result = pipeline.run_suite(
+        n_target=150, sim_path="unused", output_dir=str(tmp_path), nproc=1,
+        dir_prefix="CV_",
+    )
+
+    assert result["sim_ids"].dtype.kind in "iu"  # int, same convention as LH
+    assert set(result["sim_ids"]) == set(range(27))
+    assert np.all(result["nbh"] == 150)
+
+    outfiles = list(tmp_path.glob("cv_knn_*_n150.npz"))
+    assert len(outfiles) == 1, list(tmp_path.iterdir())
+    assert not list(tmp_path.glob("agn_knn_*.npz"))
+
+    # round-trips through np.savez/np.load without corrupting the ids
     loaded = np.load(outfiles[0], allow_pickle=True)
     assert set(loaded["sim_ids"]) == set(result["sim_ids"])
 

@@ -1,5 +1,5 @@
 """
-Loading CAMELS parameter tables (LH and 1P).
+Loading CAMELS parameter tables (LH, 1P, and CV).
 
 Deliberately join-based (never positional): every downstream function
 takes DataFrames/arrays keyed by sim_id and looks values up by that key,
@@ -43,6 +43,17 @@ def load_1p_params(params_file):
     id, unlike LH, so this does not int-cast.
     """
     return _load_params_table(params_file, prefix="1P_", cast=str)
+
+
+def load_cv_params(params_file):
+    """
+    Load the CV parameter table, indexed by integer realization id
+    (e.g. "CV_0" -> 0). Every row is expected to carry the same fixed
+    (fiducial) parameter values -- only the initial-condition seed differs
+    across realizations, since CV isolates cosmic variance from parameter
+    variation -- but that's not assumed here; notebook 05 checks it.
+    """
+    return _load_params_table(params_file, prefix="CV_", cast=int)
 
 
 def align_to_params(sim_ids, theta_all):

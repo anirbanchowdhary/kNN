@@ -92,3 +92,23 @@ PARAMS_FILE_1P = (
     f"{DATA_ROOT}/Sims/{SUITE}/{GENERATION}/{SET_NAME_1P}/"
     f"CosmoAstroSeed_{SUITE}_{GENERATION}_{SET_NAME_1P}.txt"
 )
+
+# ----------------------------------------------------------------------
+# CV set (fiducial cosmology/astrophysics, only the initial-condition
+# seed varies across realizations)
+# ----------------------------------------------------------------------
+# Directories are named CV_<realization> (e.g. CV_0 .. CV_26) -- the same
+# simple integer-id convention as LH, just a different Set name, so no new
+# label-parsing logic is needed (unlike 1P). Isolates cosmic variance: how
+# much the kNN-CDF scatters between exact physical replicas of the same
+# universe, from nothing but chance -- a noise floor to compare a real
+# response against. Realization count not independently verified for this
+# account's data; notebook 05 discovers it rather than assuming 27.
+
+SET_NAME_CV = "CV"
+
+SIM_PATH_CV = f"{DATA_ROOT}/Sims/{SUITE}/{GENERATION}/{SET_NAME_CV}"
+PARAMS_FILE_CV = (
+    f"{DATA_ROOT}/Sims/{SUITE}/{GENERATION}/{SET_NAME_CV}/"
+    f"CosmoAstroSeed_{SUITE}_{GENERATION}_{SET_NAME_CV}.txt"
+)

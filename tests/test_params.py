@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from src.params import load_params, load_1p_params
+from src.params import load_params, load_1p_params, load_cv_params
 
 
 def _write(tmp_path, name, lines):
@@ -42,3 +42,20 @@ def test_load_1p_params_drops_the_name_column_and_keeps_string_labels(tmp_path):
     # precondition infer_1p_parameter_names's max()-min() needs
     for col in theta.columns:
         assert pd.api.types.is_numeric_dtype(theta[col])
+
+
+def test_load_cv_params_indexes_by_integer_realization(tmp_path):
+    path = _write(tmp_path, "cv.txt", [
+        "#Name Omega_m sigma_8 seed",
+        "CV_0 0.3 0.8 1",
+        "CV_1 0.3 0.8 2",
+        "CV_2 0.3 0.8 3",
+    ])
+    theta = load_cv_params(path)
+
+    assert "#Name" not in theta.columns
+    assert list(theta.index) == [0, 1, 2]
+    # CV holds the physics fixed -- only seed should vary
+    assert theta["Omega_m"].nunique() == 1
+    assert theta["sigma_8"].nunique() == 1
+    assert theta["seed"].nunique() == 3
