@@ -8,6 +8,8 @@ from src.onep import (
     group_steps,
     mean_cdf_by_step,
     monotonic_trend,
+    step_label,
+    fiducial_value,
 )
 
 
@@ -176,3 +178,62 @@ def test_monotonic_trend_detects_a_real_trend():
 def test_monotonic_trend_requires_at_least_three_steps():
     with pytest.raises(ValueError):
         monotonic_trend(np.array([0.1, 0.2]), np.array([1.0, 2.0]))
+
+
+def test_step_label_round_trips_with_parse_1p_label():
+    assert step_label(1, 3) == "p1_3"
+    assert step_label(1, -2) == "p1_n2"
+    assert step_label(10, 1) == "p10_1"
+    for pidx, step in [(1, 3), (1, -2), (10, 1), (28, -4)]:
+        assert parse_1p_label(step_label(pidx, step)) == (pidx, step)
+
+
+def test_step_label_rejects_zero():
+    # step 0 is the shared fiducial and has no single reconstructable
+    # label -- callers must use fiducial_value() instead
+    with pytest.raises(ValueError):
+        step_label(1, 0)
+
+
+def test_fiducial_value_works_without_a_literal_zero_row():
+    # Regression: the real parameter table for this 1P set has no row
+    # literally labeled "0" -- it lists a separate fiducial repeat per
+    # parameter instead (e.g. "p1_0", "p2_0", ...), even though the
+    # *simulations* dedupe the fiducial to one shared snapshot. A lookup
+    # by literal "0" label raised KeyError; fiducial_value() must not.
+    fiducial = {"Omega0": 0.31, "sigma8": 0.8, "A": 1.5}
+    rows = {}
+    for pidx, target in enumerate(fiducial, start=1):
+        for step in (-2, -1, 0, 1, 2):
+            label = f"p{pidx}_0" if step == 0 else step_label(pidx, step)
+            row = dict(fiducial)
+            row[target] = fiducial[target] + step * 0.02
+            rows[label] = row
+    theta = pd.DataFrame(rows).T[list(fiducial)]
+
+    assert "0" not in theta.index
+    for name, expected in fiducial.items():
+        assert fiducial_value(theta, name) == pytest.approx(expected)
+
+
+def test_fiducial_value_works_with_a_literal_zero_row_too():
+    # the other real convention (one shared "0" row) must also work
+    fiducial = {"Omega0": 0.31, "sigma8": 0.8}
+    rows = {"0": dict(fiducial)}
+    for pidx, target in enumerate(fiducial, start=1):
+        for step in (-1, 1):
+            row = dict(fiducial)
+            row[target] = fiducial[target] + step * 0.02
+            rows[step_label(pidx, step)] = row
+    theta = pd.DataFrame(rows).T[list(fiducial)]
+
+    for name, expected in fiducial.items():
+        assert fiducial_value(theta, name) == pytest.approx(expected)
+
+
+def test_fiducial_value_raises_on_ambiguous_tie():
+    # two equally-common values -- no clear fiducial, must not silently
+    # guess
+    theta = pd.DataFrame({"X": [1.0, 1.0, 2.0, 2.0]})
+    with pytest.raises(ValueError):
+        fiducial_value(theta, "X")

@@ -62,6 +62,49 @@ def parse_1p_label(label):
     return int(param_index), step
 
 
+def step_label(param_index, step):
+    """
+    Reconstruct the on-disk label for a non-zero (param_index, step):
+    "p<N>_<M>" for positive steps, "p<N>_n<M>" for negative. Step 0 (the
+    shared fiducial) has no single canonical label to reconstruct -- use
+    `fiducial_value` to look up a parameter's value there instead.
+    """
+    if step > 0:
+        return f"p{param_index}_{step}"
+    if step < 0:
+        return f"p{param_index}_n{abs(step)}"
+    raise ValueError("step 0 is the shared fiducial; use fiducial_value(), not step_label()")
+
+
+def fiducial_value(theta_1p, name):
+    """
+    The shared fiducial's value for column `name`, read from `theta_1p`
+    (from `params.load_1p_params`) without assuming the parameter table
+    has an explicit row labeled "0".
+
+    This matters because the *simulations* dedupe the fiducial to one
+    shared run (one snapshot directory, "1P_0"), but the *parameter
+    table* documenting each named recipe isn't guaranteed to mirror that:
+    some CAMELS releases instead list a separate fiducial row per
+    parameter (e.g. "p1_0", "p2_0", ...), so a literal `theta_1p.loc["0"]`
+    lookup can raise KeyError even though the table clearly implies a
+    fiducial value throughout. Since every row except `name`'s own
+    handful of swept rows sits at the fiducial value for that column, the
+    fiducial value is simply the most common ("mode") value in the column
+    -- robust to whichever row-labeling convention the table actually
+    uses.
+    """
+    counts = theta_1p[name].value_counts()
+    if len(counts) == 0:
+        raise ValueError(f"'{name}' has no values to determine a fiducial from")
+    if len(counts) > 1 and counts.iloc[1] == counts.iloc[0]:
+        raise ValueError(
+            f"'{name}' has no single dominant value ({counts.iloc[0]} rows "
+            f"tied at the top) -- can't identify its fiducial value unambiguously"
+        )
+    return counts.index[0]
+
+
 def infer_1p_parameter_names(theta_1p, tol=1e-8, exclude=("seed",)):
     """
     For each param_index group in `theta_1p` (indexed by 1P labels), find
