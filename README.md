@@ -221,24 +221,25 @@ pytest tests/
   clears the noise.
 - **Galaxy tracer** (notebook 06, real-data run, 1000/1000 LH simulations
   have group catalogs): fixed-N galaxies (`N_TARGET_GAL=262`, 5th
-  percentile) show `Omega_m` significant (R=0.0234, q≈0) as expected, but
-  also **`sigma_8` significant (R=0.0049, q=0.0015)** — a parameter that
-  is *not* significant for AGN at the matched fixed-N selection
-  (R=0.0019, q=0.62). This is the first real evidence of a second
-  significant parameter anywhere in this project, and it shows up
-  specifically in the tracer comparison, not the LH set alone. The direct
-  cross-tracer check (`bin_correlation`, section 6) finds galaxy and AGN
-  clustering fluctuations are correlated but not redundant — median
-  |correlation| = 0.69, max = 0.92 across the LH suite's common
-  simulations — consistent with both substantially tracing the same
-  large-scale structure while still each carrying information the other
-  doesn't (galaxies' `sigma_8` sensitivity being the clearest example).
-  Two real simulations (`LH_15`, `LH_263`) initially failed with a scipy
-  periodic-box error from `SubhaloPos` landing marginally outside
-  `[0, BOXSIZE)`; fixed by wrapping positions in `read_galaxy_catalog`
-  (`data_io.wrap_periodic`) — not yet re-run to confirm both are
-  recovered, but the effect on the results above is expected to be
-  negligible (2/1000 sims).
+  percentile, **950/1000 sims retained** after the `wrap_periodic` fix
+  below — matches AGN's own retention exactly) show `Omega_m` significant
+  (R=0.0233, q≈0) as expected, but also **`sigma_8` significant
+  (R=0.0047, q=0.0075)** — a parameter that is *not* significant for AGN
+  at the matched fixed-N selection (R=0.0019, q=0.62). This is the first
+  real evidence of a second significant parameter anywhere in this
+  project, and it shows up specifically in the tracer comparison, not the
+  LH set alone. The direct cross-tracer check (`bin_correlation`, section
+  6) finds galaxy and AGN clustering fluctuations are correlated but not
+  redundant — median |correlation| = 0.69, max = 0.92 across the 929
+  simulations common to both runs — consistent with both substantially
+  tracing the same large-scale structure while still each carrying
+  information the other doesn't (galaxies' `sigma_8` sensitivity being
+  the clearest example). Two real simulations (`LH_15`, `LH_263`)
+  initially failed with a scipy periodic-box error from `SubhaloPos`
+  landing marginally outside `[0, BOXSIZE)`; fixed by wrapping positions
+  in `read_galaxy_catalog` (`data_io.wrap_periodic`) and **confirmed
+  recovered** on re-run (948→950/1000), with the results above essentially
+  unchanged, as expected for a 2/1000-simulation fix.
 
 ## Roadmap (not built yet)
 
@@ -252,11 +253,6 @@ pytest tests/
   galaxy tracer's `sigma_8` significance (notebook 06) is that second
   signal, so a Fisher/covariance analysis (using the galaxy sensitivity
   table, or a joint AGN+galaxy one) now has something to act on.
-- **Re-run notebook 06's galaxy generation** after the `wrap_periodic` fix
-  to confirm `LH_15`/`LH_263` are recovered (expected to bring galaxy
-  retention from 948/1000 to ~950/1000, matching AGN's retention at its
-  own `N_TARGET`) — a real-data confirmation still owed, not just the
-  synthetic dry-run's word for it.
 - Robustness: does the `Omega_m` result hold across different `N_TARGET`,
   other snapshots/redshifts, and an Eddington-ratio (rather than luminosity)
   selection?
