@@ -130,3 +130,11 @@ GALAXY_MASS_CUT = 1e8      # Msun, base stellar-mass floor before fixed-N rankin
 MIN_GALAXIES = 5             # minimum retained galaxies for a sim to be usable
 
 GROUPS_PATH = f"{DATA_ROOT}/Sims/{SUITE}/{GENERATION}/{SET_NAME}"
+
+# Galaxy group catalogs over the CV set (for a galaxy noise floor, the
+# missing ingredient for a galaxy Fisher forecast -- notebook 05 only
+# ever ran the AGN pipeline over CV). Inferred from the just-confirmed
+# LH pattern (GROUPS_PATH = SIM_PATH, no separate "Groups" type) rather
+# than independently verified for CV; notebook 07 checks it the same way
+# notebook 06 checked GROUPS_PATH.
+GROUPS_PATH_CV = SIM_PATH_CV

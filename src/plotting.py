@@ -180,6 +180,31 @@ def plot_sensitivity_bar(summary_df, cosmo_params, astro_params, ax=None, figsiz
     return fig, ax
 
 
+def plot_fisher_ellipse(ax, center, cov2x2, n_sigma=(1, 2), color="#1a1a2e", label=None, alpha=0.25):
+    """
+    Draw `n_sigma` Fisher confidence ellipses for a 2-parameter
+    covariance, centered at `center` (e.g. the LH suite's mean/fiducial
+    parameter values). Draws the largest sigma first so smaller ones
+    layer on top and stay visible; only the innermost ellipse carries
+    `label`, so a legend shows one entry per forecast, not one per sigma.
+    """
+    from matplotlib.patches import Ellipse
+
+    from .fisher import confidence_ellipse_params
+
+    sigmas = sorted(n_sigma, reverse=True)
+    for i, ns in enumerate(sigmas):
+        width, height, angle = confidence_ellipse_params(cov2x2, n_sigma=ns)
+        ell = Ellipse(
+            center, width, height, angle=angle,
+            facecolor=color, alpha=alpha, edgecolor=color, linewidth=1.4,
+            label=label if ns == min(sigmas) else None,
+            zorder=2 + i,
+        )
+        ax.add_patch(ell)
+    return ax
+
+
 def plot_bin_correlation(rgrid, kvals, corr, ax=None, figsize=(7, 4), logx=True):
     """
     `complementarity.bin_correlation`'s (n_k, n_r) output, one line per k.

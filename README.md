@@ -88,8 +88,12 @@ src/
                                   with bootstrap/null, FDR-adjusted significance
   complementarity.py              cross-tracer per-bin correlation (AGN vs.
                                    galaxies): redundant vs. complementary information
+  fisher.py                       Fisher-matrix precision forecast: LH-regression
+                                   response + CV-noise covariance -> marginalized
+                                   (Omega_m, sigma_8) constraint, per tracer and combined
   plotting.py                     figures: scale response, sensitivity bar
-                                   (with null floor), 1P sweep, cross-tracer correlation
+                                   (with null floor), 1P sweep, cross-tracer correlation,
+                                   Fisher confidence ellipses
 notebooks/
   01_agn_luminosity_knn_sensitivity.ipynb   top-10%-by-luminosity run (executed)
   02_fixed_density_agn_knn.ipynb             fixed-number-density run + comparison
@@ -102,6 +106,9 @@ notebooks/
   06_galaxy_agn_complementarity.ipynb          galaxies vs. AGN: same-parameter
                                                 sensitivity comparison + direct
                                                 cross-tracer correlation check
+  07_fisher_forecast.ipynb                      Fisher forecast: how tightly could
+                                                 (Omega_m, sigma_8) be constrained,
+                                                 per tracer and (naively) combined
 tests/
   synthetic-data / fake-I/O unit tests for every module above (no simulation
   data required to run these) — including pipeline.run_suite()/run_galaxy_suite()
@@ -240,6 +247,29 @@ pytest tests/
   in `read_galaxy_catalog` (`data_io.wrap_periodic`) and **confirmed
   recovered** on re-run (948→950/1000), with the results above essentially
   unchanged, as expected for a 2/1000-simulation fix.
+- **Fisher forecast** (notebook 07, built, not yet run against real data):
+  turns the LH response + CV noise floor into a precision forecast for
+  `(Omega_m, sigma_8)` — not a predictor of either parameter's value for a
+  specific simulation (that needs a regression/emulator, still on the
+  roadmap below), but an answer to "how tightly could this statistic
+  constrain them, in principle". The response is estimated by a proper
+  multivariate regression against all 6 LH parameters at once
+  (`fisher.linear_response`, controlling for the other 5 — not
+  `sensitivity_table`'s marginal quartile contrast), and the noise comes
+  from each tracer's own CV run — which meant building galaxy CV support
+  for the first time (`GROUPS_PATH_CV`, notebook 07 section 1-2), since
+  notebook 05 only ever ran AGN over CV. Two real simplifications, both
+  documented in `src/fisher.py`'s module docstring and the notebook's
+  "Reading this": only the diagonal of the noise covariance is used (CV
+  has too few realizations to invert a ~150-bin empirical covariance),
+  and the "combined AGN+galaxy" forecast naively sums Fisher matrices,
+  which assumes independence that notebook 06 already showed is false
+  (median cross-tracer correlation 0.69) — so it's a best-case upper
+  bound on the value of combining, not a rigorous joint constraint. Also
+  fixed along the way: `run_galaxy_suite` used a fixed `"galaxy_knn_..."`
+  output filename regardless of `dir_prefix`, so a CV run at the same N
+  as the LH run would have silently overwritten it — now tagged
+  per-prefix like `run_suite` already was, with a regression test.
 
 ## Roadmap (not built yet)
 
@@ -247,12 +277,19 @@ pytest tests/
   the identical N doesn't (notebook 03's biggest open question)? Worth
   checking whether it's specific to `A_SN1` or shows up for other feedback
   parameters at different N/snapshots before reading much into it.
-- **Degeneracy**: whether two parameters (e.g. `Omega_m` and `sigma_8`)
-  leave similar-looking imprints the kNN-CDF alone can't tell apart. Was
-  lower priority until a second parameter showed a real signal — the
-  galaxy tracer's `sigma_8` significance (notebook 06) is that second
-  signal, so a Fisher/covariance analysis (using the galaxy sensitivity
-  table, or a joint AGN+galaxy one) now has something to act on.
+- **Run notebook 07 against real data** to get the first actual
+  `(Omega_m, sigma_8)` Fisher forecast — built and synthetic-dry-run
+  validated, but every number in it is still unverified against the real
+  galaxy CV noise floor it generates for the first time.
+- **A rigorous combined (AGN+galaxy) forecast**: needs the AGN-galaxy
+  cross-covariance (running both tracers over the *same* CV realizations
+  and measuring their joint scatter), not just each tracer's own CV run —
+  the naive independent-sum in notebook 07 is only an upper bound.
+- **Point-prediction of `Omega_m`/`sigma_8`** from a measured kNN-CDF: a
+  regression/emulator (e.g. random forest or Gaussian process) trained on
+  the LH suite's `(summary, theta)` pairs, validated on a held-out split —
+  a different tool from the Fisher forecast above, which only says how
+  precise such a predictor *could* be, not what it would actually predict.
 - Robustness: does the `Omega_m` result hold across different `N_TARGET`,
   other snapshots/redshifts, and an Eddington-ratio (rather than luminosity)
   selection?

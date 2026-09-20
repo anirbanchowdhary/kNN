@@ -364,7 +364,16 @@ def run_galaxy_suite(
     n_gal = np.array([r[2] for r in results])
 
     os.makedirs(output_dir, exist_ok=True)
-    outfile = f"{output_dir}/galaxy_knn_snap{snap}_M{mass_cut:.0e}_n{n_target}.npz"
+    # LH keeps the unchanged "galaxy_knn_..." name (matches what's already
+    # on disk from the first real run); any other set (e.g. "CV_") gets
+    # its own distinct tag, the same dir_prefix-based scheme run_suite
+    # uses -- without it, a CV run at the same N would silently overwrite
+    # the LH run's .npz, since both would otherwise share one filename.
+    if dir_prefix == "LH_":
+        set_tag = "galaxy"
+    else:
+        set_tag = f"galaxy_{dir_prefix.strip('_').lower()}"  # e.g. "galaxy_cv"
+    outfile = f"{output_dir}/{set_tag}_knn_snap{snap}_M{mass_cut:.0e}_n{n_target}.npz"
 
     np.savez(
         outfile,

@@ -199,6 +199,41 @@ def test_run_galaxy_suite_drops_sims_below_n_target(fake_lh_galaxy_catalogs, tmp
     assert np.all(result["nbh"] == 205)
 
 
+def test_run_galaxy_suite_cv_gets_its_own_filename_not_overwriting_lh(monkeypatch, tmp_path):
+    # Regression: run_galaxy_suite used to always save to
+    # "galaxy_knn_..." regardless of dir_prefix, so a CV run at the same
+    # N as an already-saved LH run would silently clobber it. One fake
+    # find/read pair covers both prefixes so both calls share it, rather
+    # than composing two fixtures that would monkeypatch over each other.
+    lh_paths = [f"/fake/LH/LH_{i}/groups_050.hdf5" for i in range(6)]
+    cv_paths = [f"/fake/CV/CV_{i}/groups_050.hdf5" for i in range(6)]
+    all_paths = lh_paths + cv_paths
+
+    def fake_find_group_catalogs(groups_path, snap, prefix="LH_"):
+        return [p for p in all_paths if prefix in p]
+
+    def fake_read_galaxy_catalog(path):
+        label = path.split("/")[-2]  # "LH_3" or "CV_3"
+        sim_id = int(label.split("_")[1])
+        return _fake_galaxy_catalog(n=200, seed=hash(label) % 10_000)
+
+    monkeypatch.setattr(pipeline, "find_group_catalogs", fake_find_group_catalogs)
+    monkeypatch.setattr(pipeline, "read_galaxy_catalog", fake_read_galaxy_catalog)
+
+    pipeline.run_galaxy_suite(n_target=100, output_dir=str(tmp_path), nproc=1)  # LH
+    lh_files = set(tmp_path.glob("galaxy_knn_*_n100.npz"))
+    assert len(lh_files) == 1
+
+    pipeline.run_galaxy_suite(
+        n_target=100, output_dir=str(tmp_path), nproc=1,
+        groups_path="unused", dir_prefix="CV_",
+    )  # CV, deliberately same N
+
+    assert lh_files == set(tmp_path.glob("galaxy_knn_*_n100.npz")), "LH file was overwritten"
+    cv_files = list(tmp_path.glob("galaxy_cv_knn_*_n100.npz"))
+    assert len(cv_files) == 1, list(tmp_path.iterdir())
+
+
 def test_run_suite_drops_sims_below_n_target(fake_lh_snapshots, tmp_path):
     # fake catalogs have 100 + 10*sim_id eligible-ish BHs; sim_id=0 has the
     # fewest (~100), so a high n_target should drop it while keeping others
