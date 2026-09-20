@@ -199,6 +199,23 @@ tests/
   08 section 6) — not inside a loop, so full per-fit parallelism
   (`functools.partial(default_model, n_jobs=-1)`) is the right call
   there.
+- **Even fold-level parallelism per feature set left cores idle between
+  feature sets — flatten instead of loop.** Calling
+  `cross_val_predict_emulator` once per feature set (notebook 08 section
+  3's `AGN`/`galaxy`/`combined` comparison) is still only fold-parallel
+  *within* one feature set: the next feature set's fits don't start until
+  the current one's both targets finish, so a machine with more cores
+  than `n_splits` folds keep busy sits partly idle between feature sets —
+  and real data confirmed this was still too slow even after the fix
+  above. `cross_val_predict_many` dispatches every (feature set, target,
+  fold) triple as one flat, independent unit of work in a single
+  `joblib.Parallel` call, so the whole section load-balances across every
+  core at once, and its `verbose=` forwards straight to `joblib`'s own
+  progress reporting — a running "Done k out of N | elapsed ... remaining
+  ..." line covering the entire section, not one feature set at a time.
+  Numerically identical to calling `cross_val_predict_emulator` per
+  feature set (same `KFold` splits, same per-fold fit) — a re-dispatch of
+  the same work, not a different model.
 - **Selection-bias diagnostics are not optional for this selection.**
   Because the tracer is *luminosity*-selected (not mass-only), the number of
   AGN surviving the cut in a given simulation can itself correlate with a

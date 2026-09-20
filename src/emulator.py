@@ -67,10 +67,32 @@ else in this project. Never trust `prediction_metrics` computed from
 anything but `cross_val_predict_emulator`'s held-out predictions --
 `train_full_model`'s model has seen every LH simulation and its own
 predictions on that same data say nothing about generalization.
+
+Comparing several feature sets (notebook 08 section 3 -- AGN-only,
+galaxy-only, combined) by calling `cross_val_predict_emulator` once per
+feature set is still only fold-parallel *within* one feature set:
+`n_splits` fits are in flight together, but the next feature set's fits
+don't start until the current one's both targets finish, so any cores
+beyond what `n_splits` can keep busy sit idle between feature sets. On
+real hardware with more cores than one feature set's folds can use (or
+just more feature sets than a naive one-at-a-time loop pipelines well),
+that idle time is real wall-clock cost with nothing hiding it -- and
+because `cross_val_predict`'s own progress output is scoped to a single
+call, there's also no visibility into whether a feature set is actually
+running or stuck. `cross_val_predict_many` flattens every (feature set,
+target, fold) triple into ONE independent unit of work and dispatches
+them all in a single `joblib.Parallel` call, so joblib load-balances the
+whole section across every available core at once, and a single
+`verbose=` setting reports progress across the entire section rather
+than one feature set at a time. It computes exactly the same predictions
+`cross_val_predict_emulator` would (same `KFold` splits, same per-fold
+fit-and-predict) -- purely a re-dispatch of the same work, not a
+different model.
 """
 
 import numpy as np
 import pandas as pd
+from joblib import Parallel, delayed
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import r2_score, mean_squared_error
 from sklearn.model_selection import KFold, cross_val_predict
@@ -194,6 +216,89 @@ def cross_val_predict_emulator(X, y, model_factory=default_model, n_splits=10,
         for j in range(y_2d.shape[1])
     ])
     return preds[:, 0] if is_1d else preds
+
+
+def _fit_predict_fold(model_factory, random_state, X, y_col, train_idx, test_idx):
+    """
+    One independent (feature set, target, fold) unit of work for
+    `cross_val_predict_many` -- a module-level function, not a closure,
+    so joblib's process-based backend can pickle and dispatch it.
+    """
+    model = model_factory(random_state=random_state)
+    model.fit(X[train_idx], y_col[train_idx])
+    return model.predict(X[test_idx])
+
+
+def cross_val_predict_many(feature_sets, targets, model_factory=default_model,
+                            n_splits=10, random_state=42, n_jobs=-1, verbose=0):
+    """
+    Out-of-fold predictions for several feature sets at once, dispatched
+    as ONE flat, independent batch of (feature set, target, fold) fits
+    rather than one `cross_val_predict_emulator` call per feature set
+    (see module docstring for why that matters on real hardware).
+
+    Uses the same `KFold(shuffle=True, random_state=...)` split and the
+    same per-target-independent fitting `cross_val_predict_emulator`
+    uses, so results are numerically identical to calling
+    `cross_val_predict_emulator` once per feature set with the same
+    `model_factory`/`n_splits`/`random_state` -- this is a re-dispatch of
+    the same computation, not a different one.
+
+    Parameters
+    ----------
+    feature_sets : dict {name: (X, theta)} -- theta must be a DataFrame
+                   containing `targets` as columns, aligned row-for-row
+                   with X (e.g. the `feature_sets` dict notebook 08
+                   builds directly)
+    targets       : list of target column names to predict, e.g.
+                    ["Omega_m", "sigma_8"]
+    verbose       : forwarded to `joblib.Parallel` -- e.g. `verbose=10`
+                    prints a running "Done k out of N | elapsed ...
+                    remaining ..." line as fits complete, covering every
+                    feature set at once (the real per-fit progress signal
+                    that a `tqdm` wrapped around this function's own
+                    outer loop cannot give, since that loop no longer
+                    exists -- all fits are dispatched together)
+
+    Returns
+    -------
+    dict {name: (X, y, y_pred)}, same per-feature-set contents
+    `cross_val_predict_emulator` produces (X as given, y as
+    `theta[targets].values`, y_pred the same shape) -- so
+    `prediction_metrics` and everything downstream is unchanged.
+    """
+    jobs = []
+    job_meta = []
+    outputs = {}
+
+    for name, (X, theta) in feature_sets.items():
+        X = np.asarray(X)
+        y = theta[list(targets)].values
+        if n_splits > len(X):
+            raise ValueError(
+                f"n_splits={n_splits} exceeds the number of rows ({len(X)}) for feature set '{name}'"
+            )
+        cv = KFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+        splits = list(cv.split(X))
+        outputs[name] = (X, y, np.empty_like(y, dtype=float))
+        for t_idx in range(y.shape[1]):
+            for train_idx, test_idx in splits:
+                jobs.append(delayed(_fit_predict_fold)(
+                    model_factory, random_state, X, y[:, t_idx], train_idx, test_idx
+                ))
+                job_meta.append((name, t_idx, test_idx))
+
+    print(
+        f"cross_val_predict_many: dispatching {len(jobs)} independent fold fits "
+        f"({len(feature_sets)} feature sets x {len(targets)} targets x {n_splits} folds)..."
+    )
+
+    fold_preds = Parallel(n_jobs=n_jobs, verbose=verbose)(jobs)
+
+    for (name, t_idx, test_idx), pred in zip(job_meta, fold_preds):
+        outputs[name][2][test_idx, t_idx] = pred
+
+    return outputs
 
 
 def train_full_model(X, y, model_factory=default_model, random_state=42):

@@ -10,6 +10,7 @@ from src.emulator import (
     default_model,
     combined_features,
     cross_val_predict_emulator,
+    cross_val_predict_many,
     train_full_model,
     prediction_metrics,
     null_control_metrics,
@@ -299,6 +300,41 @@ def test_default_model_has_documented_parameters():
     # explicit override still works, for a genuine one-off fit outside
     # any fold loop (train_full_model, via functools.partial)
     assert default_model(random_state=7, n_jobs=-1).n_jobs == -1
+
+
+def test_cross_val_predict_many_matches_per_feature_set_calls():
+    # cross_val_predict_many flattens every (feature set, target, fold)
+    # into one joblib batch instead of one cross_val_predict_emulator
+    # call per feature set -- same KFold splits, same per-fold fit, so it
+    # must reproduce exactly what looping cross_val_predict_emulator
+    # would give, not just something similarly good.
+    X1, y1, theta1 = _synthetic_case(seed=1, n_sims=120)
+    X2, y2, theta2 = _synthetic_case(seed=2, n_sims=90)
+    feature_sets = {"a": (X1, theta1), "b": (X2, theta2)}
+    targets = ["Omega_m", "sigma_8"]
+
+    expected = {
+        name: cross_val_predict_emulator(
+            X, theta[targets].values, model_factory=_fast_model, n_splits=5, random_state=7,
+        )
+        for name, (X, theta) in feature_sets.items()
+    }
+
+    got = cross_val_predict_many(
+        feature_sets, targets, model_factory=_fast_model, n_splits=5, random_state=7,
+    )
+
+    assert set(got) == set(expected)
+    for name in expected:
+        X, y, y_pred = got[name]
+        assert np.array_equal(y, feature_sets[name][1][targets].values)
+        assert np.array_equal(y_pred, expected[name])
+
+
+def test_cross_val_predict_many_rejects_too_many_splits():
+    X, y, theta = _synthetic_case(n_sims=5)
+    with pytest.raises(ValueError):
+        cross_val_predict_many({"a": (X, theta)}, ["Omega_m", "sigma_8"], n_splits=10)
 
 
 def test_cross_val_predict_emulator_n_jobs_does_not_change_results():
