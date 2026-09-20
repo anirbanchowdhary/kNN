@@ -168,11 +168,53 @@ def test_mean_cdf_by_step_averages_repeated_steps_and_includes_fiducial():
 
 def test_monotonic_trend_detects_a_real_trend():
     values = np.array([0.1, 0.3, 0.5, 0.7, 0.9])
-    response = values * 2 + 0.01  # monotone increasing, tiny noise-free offset
+    response = values * 2 + 0.01  # monotone increasing, tiny noise-free offset -- perfect rank correlation
 
     rho, p = monotonic_trend(values, response)
     assert rho > 0.99
-    assert p < 0.01
+    # exact permutation p-value for a perfect rank correlation at n=5 is
+    # 2/5! = 0.0167 -- NOT scipy.stats.spearmanr's own asymptotic p-value,
+    # which reports ~1.4e-24 here (wrong by 22 orders of magnitude; see
+    # the function's docstring). A test asserting p < 0.01 would be
+    # asserting the bug.
+    assert p == pytest.approx(2 / 120, abs=1e-9)
+
+
+def test_monotonic_trend_exact_pvalue_at_n4_is_not_tiny():
+    # A perfect n=4 rank correlation is NOT significant at the 5% level
+    # under the correct exact test (2/4! = 0.083), even though scipy's
+    # own p-value reports exactly 0.0 for this case -- the clearest
+    # demonstration that scipy's default must not be used directly here.
+    values = np.array([1.0, 2.0, 3.0, 4.0])
+    response = np.array([10.0, 20.0, 30.0, 40.0])
+
+    rho, p = monotonic_trend(values, response)
+    assert rho == pytest.approx(1.0)
+    assert p == pytest.approx(2 / 24, abs=1e-9)
+    assert p > 0.05  # NOT significant, despite a perfect correlation
+
+
+def test_monotonic_trend_null_case_is_not_falsely_significant():
+    # a middling, non-extreme rank correlation at n=5 must not come out
+    # "significant" -- picked by hand (not the identity, not a reversal,
+    # not adjacent-swap) so the observed rho sits mid-pack among all 120
+    # permutations rather than at either extreme
+    values = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+    response = np.array([2.0, 1.0, 4.0, 3.0, 5.0])  # rho = 0.8, not extreme
+
+    rho, p = monotonic_trend(values, response)
+    assert abs(rho) < 0.9
+    assert p > 0.05
+
+
+def test_monotonic_trend_falls_back_to_monte_carlo_above_max_exact_n():
+    rng = np.random.default_rng(0)
+    values = np.arange(10.0)
+    response = values * 2 + rng.normal(0, 0.01, size=10)
+
+    rho, p = monotonic_trend(values, response, max_exact_n=8, n_perm=2000, seed=1)
+    assert rho > 0.99
+    assert p < 0.01  # 10 points, near-perfect trend -- should still read as significant
 
 
 def test_monotonic_trend_requires_at_least_three_steps():

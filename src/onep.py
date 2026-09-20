@@ -209,21 +209,58 @@ def mean_cdf_by_step(summaries, sim_ids, param_index, n_k, n_r):
     return step_indices, mean_cdfs
 
 
-def monotonic_trend(step_values, response_at_r):
+def monotonic_trend(step_values, response_at_r, max_exact_n=8, n_perm=20000, seed=0):
     """
     Spearman correlation between a 1P parameter's step values and a scalar
-    response (e.g. mean-CDF value at one r, for one k), as a cheap,
-    ordered-data-appropriate stand-in for the permutation test LH uses --
-    a handful of ordered grid points isn't where a shuffle-label null makes
-    sense the way it does at 1000 simulations. With no repeated seeds per
-    step in a typical 1P release, each point is a single noisy realization,
-    so treat a significant result here as a lead, not a confirmed detection
-    at LH's standard of rigor.
+    response (e.g. mean-CDF value at one r, for one k), with an exact (or,
+    above `max_exact_n`, Monte Carlo) permutation p-value -- the same
+    null-test philosophy as `sensitivity.py`'s `null_rms`/`null_scale`,
+    just adapted to a handful of ordered points instead of 1000
+    simulations, and NOT `scipy.stats.spearmanr`'s own p-value.
+
+    That distinction matters and is not cosmetic: scipy's default p-value
+    uses a large-sample (asymptotic) approximation that is badly
+    overconfident at the tiny n a 1P sweep typically has. Concretely, for
+    a perfect rank correlation (rho=+-1) scipy reports p=1.4e-24 at n=5 and
+    p=0.0 at n=4, while the true exact permutation p-value -- the fraction
+    of the n! ways to permute the response that produce |rho| at least
+    this extreme -- is 2/5!=0.017 at n=5 and 2/4!=0.083 at n=4 (not even
+    significant at the 5% level). At n=5, scipy's number is off by 22
+    orders of magnitude. This was caught from a real run: three 1P
+    parameters showed q < 1e-23 from scipy's p-value alone.
+
+    With no repeated seeds per step in a typical 1P release, each point is
+    still a single noisy realization regardless of which p-value is used,
+    so treat a significant result here as a lead, not a confirmed
+    detection at LH's standard of rigor.
 
     Returns (rho, p_value). Needs at least 3 distinct steps.
     """
+    from itertools import permutations
+
     from scipy.stats import spearmanr
 
-    if len(step_values) < 3:
+    step_values = np.asarray(step_values, dtype=float)
+    response_at_r = np.asarray(response_at_r, dtype=float)
+    n = len(step_values)
+
+    if n < 3:
         raise ValueError("need at least 3 steps for a trend test")
-    return spearmanr(step_values, response_at_r)
+
+    rho, _ = spearmanr(step_values, response_at_r)
+
+    if n <= max_exact_n:
+        null_rhos = np.array([
+            spearmanr(step_values, response_at_r[list(perm)])[0]
+            for perm in permutations(range(n))
+        ])
+    else:
+        rng = np.random.default_rng(seed)
+        idx = np.arange(n)
+        null_rhos = np.array([
+            spearmanr(step_values, response_at_r[rng.permutation(idx)])[0]
+            for _ in range(n_perm)
+        ])
+
+    p_value = np.mean(np.abs(null_rhos) >= abs(rho) - 1e-12)
+    return rho, p_value
