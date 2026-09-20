@@ -11,6 +11,7 @@ from src.emulator import (
     combined_features,
     cross_val_predict_emulator,
     cross_val_predict_many,
+    effective_cpu_count,
     train_full_model,
     prediction_metrics,
     null_control_metrics,
@@ -300,6 +301,16 @@ def test_default_model_has_documented_parameters():
     # explicit override still works, for a genuine one-off fit outside
     # any fold loop (train_full_model, via functools.partial)
     assert default_model(random_state=7, n_jobs=-1).n_jobs == -1
+
+
+def test_effective_cpu_count_is_a_sane_positive_bound():
+    import os
+    n = effective_cpu_count()
+    assert isinstance(n, int)
+    assert n >= 1
+    # it's a ceiling derived from os.cpu_count() (possibly tightened by a
+    # cgroup quota or affinity mask), so it can never exceed it
+    assert n <= (os.cpu_count() or 1)
 
 
 def test_cross_val_predict_many_matches_per_feature_set_calls():

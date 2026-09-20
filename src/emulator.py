@@ -88,7 +88,21 @@ than one feature set at a time. It computes exactly the same predictions
 `cross_val_predict_emulator` would (same `KFold` splits, same per-fold
 fit-and-predict) -- purely a re-dispatch of the same work, not a
 different model.
+
+`n_jobs=-1` tells joblib to target `os.cpu_count()` workers, which is
+the HOST's logical CPU count and can badly overstate what's actually
+usable inside a container (e.g. a real run reported 256 detected cores
+while a single 500-tree fit still took over a minute) -- spawning far
+more worker processes than there are independent units of work is pure
+overhead with no upside. `effective_cpu_count()` checks cgroup CPU
+quotas and CPU affinity, not just `os.cpu_count()`, for a more realistic
+ceiling; callers choosing an explicit `n_jobs` (rather than trusting
+joblib's own `-1` handling) should prefer
+`min(effective_cpu_count(), <number of independent tasks>)` over a bare
+`os.cpu_count()`.
 """
+
+import os
 
 import numpy as np
 import pandas as pd
@@ -98,6 +112,62 @@ from sklearn.metrics import r2_score, mean_squared_error
 from sklearn.model_selection import KFold, cross_val_predict
 
 from .complementarity import align_common_sims
+
+
+def effective_cpu_count():
+    """
+    A more realistic worker count than `os.cpu_count()` for deciding how
+    many processes to actually spawn -- found the hard way on a real run
+    that reported `os.cpu_count() == 256` while a single 500-tree fit
+    still took over a minute: `os.cpu_count()` reports the HOST's total
+    logical CPUs, which can badly overstate what this process can
+    actually use at once inside a container. Checks, in order, and
+    returns the SMALLEST positive count found (any one of these can be
+    the actual ceiling):
+
+    1. cgroup v2 CPU quota (`/sys/fs/cgroup/cpu.max`, "<quota> <period>"
+       microseconds, or "max" for unlimited)
+    2. cgroup v1 CPU quota (`cpu.cfs_quota_us` / `cpu.cfs_period_us`
+       under `/sys/fs/cgroup/cpu/`, quota of -1 meaning unlimited)
+    3. `os.sched_getaffinity(0)` (Linux only) -- the process's actual CPU
+       affinity mask, which container CPU pinning restricts even when a
+       quota doesn't
+    4. `os.cpu_count()` as the final fallback (always available)
+
+    This does not know how many of those cores are already busy with
+    something else, only how many this process could ever use -- so it's
+    a ceiling on `n_jobs`, not a live load measurement. Never returns
+    less than 1.
+    """
+    candidates = []
+
+    try:
+        with open("/sys/fs/cgroup/cpu.max") as f:
+            quota, period = f.read().split()
+        if quota != "max":
+            candidates.append(max(1, int(quota) // int(period)))
+    except (OSError, ValueError):
+        pass
+
+    try:
+        with open("/sys/fs/cgroup/cpu/cpu.cfs_quota_us") as f:
+            quota = int(f.read())
+        with open("/sys/fs/cgroup/cpu/cpu.cfs_period_us") as f:
+            period = int(f.read())
+        if quota > 0:
+            candidates.append(max(1, quota // period))
+    except (OSError, ValueError):
+        pass
+
+    if hasattr(os, "sched_getaffinity"):
+        try:
+            candidates.append(len(os.sched_getaffinity(0)))
+        except OSError:
+            pass
+
+    candidates.append(os.cpu_count() or 1)
+
+    return min(candidates)
 
 
 def default_model(random_state=42, n_estimators=500, n_jobs=1):
