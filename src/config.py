@@ -127,4 +127,4 @@ PARAMS_FILE_CV = (
 GALAXY_MASS_CUT = 1e8      # Msun, base stellar-mass floor before fixed-N ranking
 MIN_GALAXIES = 5             # minimum retained galaxies for a sim to be usable
 
-GROUPS_PATH = f"{DATA_ROOT}/Groups/{SUITE}/{GENERATION}/{SET_NAME}"
+GROUPS_PATH = f"{DATA_ROOT}/Sims/{SUITE}/{GENERATION}/{SET_NAME}"
