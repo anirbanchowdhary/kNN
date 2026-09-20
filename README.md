@@ -247,29 +247,40 @@ pytest tests/
   in `read_galaxy_catalog` (`data_io.wrap_periodic`) and **confirmed
   recovered** on re-run (948→950/1000), with the results above essentially
   unchanged, as expected for a 2/1000-simulation fix.
-- **Fisher forecast** (notebook 07, built, not yet run against real data):
-  turns the LH response + CV noise floor into a precision forecast for
-  `(Omega_m, sigma_8)` — not a predictor of either parameter's value for a
-  specific simulation (that needs a regression/emulator, still on the
-  roadmap below), but an answer to "how tightly could this statistic
-  constrain them, in principle". The response is estimated by a proper
-  multivariate regression against all 6 LH parameters at once
-  (`fisher.linear_response`, controlling for the other 5 — not
-  `sensitivity_table`'s marginal quartile contrast), and the noise comes
-  from each tracer's own CV run — which meant building galaxy CV support
-  for the first time (`GROUPS_PATH_CV`, notebook 07 section 1-2), since
-  notebook 05 only ever ran AGN over CV. Two real simplifications, both
+- **Fisher forecast** (notebook 07, real-data run): turns the LH response
+  + CV noise floor into a precision forecast for `(Omega_m, sigma_8)` —
+  not a predictor of either parameter's value for a specific simulation
+  (that needs a regression/emulator, still on the roadmap below), but an
+  answer to "how tightly could this statistic constrain them, in
+  principle". The response is estimated by a proper multivariate
+  regression against all 6 LH parameters at once (`fisher.linear_response`,
+  controlling for the other 5 — not `sensitivity_table`'s marginal
+  quartile contrast), and the noise comes from each tracer's own CV run —
+  which meant building galaxy CV support for the first time
+  (`GROUPS_PATH_CV`), since notebook 05 only ever ran AGN over CV; that
+  first real galaxy CV run (27/27 realizations retained at N=262) gives a
+  galaxy RMS noise floor of 0.0187, close to but a little above AGN's
+  0.0157. **Real numbers**: `sigma(Omega_m)` = 0.046 (AGN) / 0.053
+  (galaxy) / 0.025 (naive combined); `sigma(sigma_8)` = 0.278 (AGN) /
+  0.226 (galaxy) / 0.119 (naive combined) — galaxies forecast a
+  meaningfully tighter `sigma_8` constraint than AGN alone, matching
+  notebook 06's significance finding, and combining tightens both axes
+  ~1.8-1.9x over the best single tracer (1-sigma ellipse area shrinks to
+  27% of the best single tracer's). Two real simplifications, both
   documented in `src/fisher.py`'s module docstring and the notebook's
   "Reading this": only the diagonal of the noise covariance is used (CV
-  has too few realizations to invert a ~150-bin empirical covariance),
-  and the "combined AGN+galaxy" forecast naively sums Fisher matrices,
-  which assumes independence that notebook 06 already showed is false
-  (median cross-tracer correlation 0.69) — so it's a best-case upper
-  bound on the value of combining, not a rigorous joint constraint. Also
-  fixed along the way: `run_galaxy_suite` used a fixed `"galaxy_knn_..."`
-  output filename regardless of `dir_prefix`, so a CV run at the same N
-  as the LH run would have silently overwritten it — now tagged
-  per-prefix like `run_suite` already was, with a regression test.
+  has too few realizations to invert a ~150-bin empirical covariance —
+  33/150 AGN bins and 23/150 galaxy bins were pinned-CDF zero-variance
+  and dropped before the real forecast above), and the "combined
+  AGN+galaxy" forecast naively sums Fisher matrices, which assumes
+  independence that notebook 06 already showed is false (median
+  cross-tracer correlation 0.69) — so the combined numbers above are a
+  best-case upper bound on the value of combining, not a rigorous joint
+  constraint. Also fixed along the way: `run_galaxy_suite` used a fixed
+  `"galaxy_knn_..."` output filename regardless of `dir_prefix`, so this
+  notebook's CV run at the same N as the LH run would have silently
+  overwritten it — now tagged per-prefix like `run_suite` already was,
+  with a regression test.
 
 ## Roadmap (not built yet)
 
@@ -277,10 +288,6 @@ pytest tests/
   the identical N doesn't (notebook 03's biggest open question)? Worth
   checking whether it's specific to `A_SN1` or shows up for other feedback
   parameters at different N/snapshots before reading much into it.
-- **Run notebook 07 against real data** to get the first actual
-  `(Omega_m, sigma_8)` Fisher forecast — built and synthetic-dry-run
-  validated, but every number in it is still unverified against the real
-  galaxy CV noise floor it generates for the first time.
 - **A rigorous combined (AGN+galaxy) forecast**: needs the AGN-galaxy
   cross-covariance (running both tracers over the *same* CV realizations
   and measuring their joint scatter), not just each tracer's own CV run —
